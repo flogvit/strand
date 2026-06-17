@@ -45,6 +45,32 @@ npm run strand -- run double         # transpile to TypeScript and execute
 npm run strand -- emit               # print the TS projection of the namespace
 ```
 
+## Usable on real code: Strand over TypeScript
+
+The toy language above proves the substrate; to make it *usable*, the same
+substrate runs over real TypeScript. Agents author ordinary `.ts` definitions in
+parallel, and Strand provides the conflict-free authoring layer — with the
+**real TypeScript compiler as the green-gate**.
+
+```bash
+npm run demo:ts              # agents author real TS in parallel; one name parks
+
+npm run strand-ts -- init
+npm run strand-ts -- submit --as alice --intent adder --code "export function add(a: number, b: number): number { return a + b; }"
+npm run strand-ts -- merge
+npm run strand-ts -- submit --as bob --intent doubler --code "export const double = (n: number): number => add(n, n);"
+npm run strand-ts -- merge
+npm run strand-ts -- eval "double(21)"   # 42 — runs the assembled real TypeScript
+npm run strand-ts -- build               # print the assembled .ts module
+```
+
+You get, on real code: definition-level content-addressing, conflict-free merge
+of independent definitions, parking of genuine same-name contention, and `tsc`
+itself rejecting any submission that does not type-check. The one thing a
+name-based language cannot give for free is *reference by identity* — TypeScript
+resolves references by name, so a rename is not transparent to callers the way
+it is in the Strand language. That is the honest "most of it, not all" trade.
+
 ## The language (v1)
 
 ```

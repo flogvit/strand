@@ -135,6 +135,23 @@ Bevisst utenfor v1: rekursjon (selvreferanse gjør hashen ill-fundert), type-inf
 eksplisitte), standardbibliotek, og — størst — *symbol-nivå koordinering på tvers av agenter* (det
 udekkede rommet fra prior-art). Det er neste kile.
 
+## Strand over TypeScript — BYGGET (den brukelige veien)
+
+Leketøys-språket beviste substratet, men var ubrukelig til ekte programmer. Derfor kjører nå
+*samme substrat over ekte TypeScript* (`src/ts/`, `npm run demo:ts`, `strand-ts`-CLI). Agenter
+skriver vanlige `.ts`-definisjoner; Strand gir det konflikt-frie forfatter-laget oppå.
+
+Realiserer **veivalg 2** (pragmatisk midte): arve hele økosystemet i stedet for å bygge ett.
+
+- Beholder på ekte kode: definisjons-nivå innholds-adressering, konflikt-fri merge av uavhengige
+  defs, parkering av ekte samme-navn-strid, og **den ekte `tsc` som grønn-gate** (createProgram,
+  ikke leketøys-typecheck) — verifisert: typefeil og dangling refs avvises ved submit.
+- Mister (ærlig): *referanse ved identitet*. TS slår opp navn leksikalsk, så omdøping er ikke
+  transparent for kallere slik det er i Strand-språket. «Mesteparten, ikke alt.»
+
+Bevist (tester + demo): tre agenter skriver ekte TS parallelt, kun det omstridte navnet parkeres,
+resten auto-merger, sammensatt modul typsjekker og kjører via `eval`. 41/41 tester grønne.
+
 ## Ikke-mål (foreløpig)
 
 - Erstatte git.
