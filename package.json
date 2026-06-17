@@ -1,0 +1,10 @@
+{
+  "name": "strand",
+  "private": true,
+  "type": "module",
+  "description": "Strand — content-addressed, conflict-free substrate for parallel agent authoring (wedge 1 prototype)",
+  "scripts": {
+    "demo": "tsx src/demo.ts",
+    "test": "tsx --test test/*.test.ts"
+  }
+}
