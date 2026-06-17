@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Strand — content-addressed, conflict-free substrate for parallel agent authoring (wedge 1 prototype)",
   "scripts": {
-    "demo": "tsx src/demo.ts",
+    "strand": "tsx src/cli.ts",
+    "demo": "bash examples/swarm.sh",
     "test": "tsx --test test/*.test.ts"
   }
 }

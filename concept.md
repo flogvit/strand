@@ -110,23 +110,30 @@ menneskelig forfatter), eller svermer der 2–4-taket er en hard blokker og smer
   modulgrenser, append-only definisjoner, type-checker som grønn-gate). ~60 % gevinst på EKTE kode.
 - *Agent-native substrat:* den dristige veien. Større gevinst, men lever/dør på brohodet.
 
-## Wedge 1 — BEVIST (kjørbar prototype)
+## Strand v1 — BYGGET (kjørbart språk + substrat)
 
-Kjernepåstanden er nå demonstrert i kode (`src/`, `test/`, TypeScript): flere agenter som
-forfatter parallelt mot samme kodebase, der **kun det ene navnet to agenter faktisk strides om
-parkeres** og alt annet auto-merger. Approach B (innholds-adresserte defs som refererer hverandre
-ved hash). Kjør: `npx tsx src/demo.ts` og `npx tsx --test test/merge.test.ts` (6/6 grønt).
+Ikke lenger bare merge-algebraen: Strand er nå et lite, ekte typet funksjonsspråk på et
+innholds-adressert substrat. `npm run demo` (fler-agent-sverm), `npm test` (28/28 grønt).
+Arkitektur:
 
-Bevist av prototypen:
-- puts kommuterer (innholds-adressert union — rekkefølge spiller ingen rolle). [krav 1, 2]
-- uavhengige navn merges urørt; eneste konflikt = samme navn → ulik hash. [krav 1, 2, 7]
-- konvergente edits (samme navn, samme innhold) er IKKE konflikt.
-- pinnet hash overlever navne-churn (referanse ved identitet). [krav 3]
-- bind til uoppløselig innhold avvises, forgifter ikke resten («grønt ved konstruksjon», minimal). [krav 4]
-- parkert konflikt er løsbar i ettertid uten å spole tilbake. [krav 7]
+- `src/syntax/` — lexer + parser for kildespråket (`def`, Int/Bool/Text, `+ - *`, `== < >`, `if`, applikasjon).
+- `src/core/` — `types`, `term` (refs ved hash), `hash` (struktur, ikke navn → alfa-ekvivalens),
+  `store` (append-only, persistbar), `resolve` (navn→hash), `typecheck` (grønn-gate), `eval` (referanse-semantikk).
+- `src/merge.ts` — algebraen: uavhengige navn auto-merger, eneste konflikt = samme navn → ulik hash, parkering.
+- `src/backend/emit_ts.ts` — transpiler core→lesbar TypeScript (din idé). Dobler som menneske-projeksjon.
+- `src/persist.ts` + `src/cli.ts` — `.strand/` på disk og hele forfatter-løkka: init/submit/merge/ls/show/eval/run/emit/conflicts/resolve.
 
-Ennå ikke bevist (neste kiler): ekte type-/kontrakt-sjekk (Approach C, krav 4 fullt), trofast
-projeksjon til ekte syntaks (krav 6 utover triviell listing), og ytelse/skala.
+Bevist (med tester):
+- innholds-adressering: strukturelt like defs (uansett parameternavn) får samme hash. [krav 1, 2]
+- uavhengige navn merges urørt; eneste konflikt = samme navn → ulik hash; konvergente edits er IKKE konflikt. [krav 1, 2, 7]
+- referanse ved identitet: en kaller pinnet til en deps hash overlever rebind av det navnet. [krav 3]
+- typecheckeren er grønn-gaten: feiltypet definisjon kommer aldri inn i storen. [krav 4 — nå *ordentlig*, ikke bare dep-resolusjon]
+- intensjon båret per binding; parkert konflikt løsbar i ettertid. [krav 5, 7]
+- trofast projeksjon: `eval` (interpreter) og `run` (transpilert TS) gir samme verdi. [krav 6]
+
+Bevisst utenfor v1: rekursjon (selvreferanse gjør hashen ill-fundert), type-inferens (signaturer er
+eksplisitte), standardbibliotek, og — størst — *symbol-nivå koordinering på tvers av agenter* (det
+udekkede rommet fra prior-art). Det er neste kile.
 
 ## Ikke-mål (foreløpig)
 
