@@ -2,11 +2,19 @@ import type { Ty } from "./types.ts";
 
 export type Hash = string; // e.g. "#7f3a1b2c"
 
-export type BinOp = "+" | "-" | "*" | "==" | "<" | ">";
+export type BinOp = "+" | "-" | "*" | "==" | "<" | ">" | "++";
 
-/** The core term language. References to other definitions are by identity
- *  (`Ref` carries a content hash), never by name — names live only in the
- *  namespace. Parameters are referenced by `Var`. */
+/** One arm of a `match`: a constructor name, the variables it binds to the
+ *  constructor's fields, and the body to evaluate when it matches. */
+export interface MatchArm {
+  ctor: string;
+  vars: string[];
+  body: CoreTerm;
+}
+
+/** The core term language. References to other value definitions are by
+ *  identity (`Ref` carries a hash); constructors and types are referenced by
+ *  name (resolved against the data registry). */
 export type CoreTerm =
   | { tag: "IntLit"; value: number }
   | { tag: "BoolLit"; value: boolean }
@@ -15,23 +23,37 @@ export type CoreTerm =
   | { tag: "Ref"; hash: Hash }
   | { tag: "App"; fn: CoreTerm; arg: CoreTerm }
   | { tag: "BinOp"; op: BinOp; left: CoreTerm; right: CoreTerm }
-  | { tag: "If"; cond: CoreTerm; then: CoreTerm; else: CoreTerm };
+  | { tag: "If"; cond: CoreTerm; then: CoreTerm; else: CoreTerm }
+  | { tag: "Self" }
+  | { tag: "Ctor"; type: string; ctor: string }
+  | { tag: "Match"; scrutinee: CoreTerm; arms: MatchArm[] };
 
 export interface Param {
   name: string;
   ty: Ty;
 }
 
-/** A definition's content: its curried parameters, declared return type, and
- *  body. This is what gets content-addressed — the name it is bound to is NOT
- *  part of it. */
 export interface CoreDef {
   params: Param[];
   ret: Ty;
   body: CoreTerm;
 }
 
-/** The set of definition hashes a term references. */
+export interface CtorDecl {
+  name: string;
+  fields: Ty[];
+}
+
+/** A `data` declaration: a type constructor with parameters and value
+ *  constructors. References to other types inside `fields` are by name. */
+export interface DataDecl {
+  name: string;
+  params: string[];
+  ctors: CtorDecl[];
+}
+
+/** The value-definition hashes a term references (constructors and types are
+ *  not value refs, so they do not appear here). */
 export function depsOf(term: CoreTerm): Hash[] {
   const out = new Set<Hash>();
   const walk = (t: CoreTerm): void => {
@@ -51,6 +73,10 @@ export function depsOf(term: CoreTerm): Hash[] {
         walk(t.cond);
         walk(t.then);
         walk(t.else);
+        break;
+      case "Match":
+        walk(t.scrutinee);
+        t.arms.forEach((a) => walk(a.body));
         break;
       default:
         break;

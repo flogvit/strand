@@ -1,12 +1,18 @@
 import { StrandResolveError } from "../errors.ts";
-import type { SurfaceDef, SurfaceTerm } from "../syntax/ast.ts";
-import type { CoreDef, CoreTerm, Hash } from "./term.ts";
+import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceTerm } from "../syntax/ast.ts";
+import type { Registry } from "./registry.ts";
+import type { CoreDef, CoreTerm, DataDecl, Hash, MatchArm } from "./term.ts";
 
-/** Turn a surface term into a core term: every `Name` becomes either a `Var`
- *  (if it is one of the enclosing parameters) or a `Ref(hash)` resolved against
- *  the namespace. Unknown names are an error — this is where "reference by
- *  identity" is established. */
-export function resolveTerm(t: SurfaceTerm, params: Set<string>, names: Map<string, Hash>): CoreTerm {
+/** Turn a surface term into a core term. A `Name` becomes a parameter `Var`, a
+ *  recursive `Self`, a data `Ctor`, or a `Ref(hash)` — in that order. */
+export function resolveTerm(
+  t: SurfaceTerm,
+  params: Set<string>,
+  names: Map<string, Hash>,
+  registry: Registry,
+  self?: string,
+): CoreTerm {
+  const rec = (s: SurfaceTerm, ps: Set<string>): CoreTerm => resolveTerm(s, ps, names, registry, self);
   switch (t.tag) {
     case "IntLit":
       return { tag: "IntLit", value: t.value };
@@ -16,37 +22,55 @@ export function resolveTerm(t: SurfaceTerm, params: Set<string>, names: Map<stri
       return { tag: "TextLit", value: t.value };
     case "Name": {
       if (params.has(t.name)) return { tag: "Var", name: t.name };
+      if (self !== undefined && t.name === self) return { tag: "Self" };
+      const c = registry.ctors.get(t.name);
+      if (c) return { tag: "Ctor", type: c.decl.name, ctor: t.name };
       const h = names.get(t.name);
       if (!h) throw new StrandResolveError(`unknown name '${t.name}'`);
       return { tag: "Ref", hash: h };
     }
     case "App":
-      return { tag: "App", fn: resolveTerm(t.fn, params, names), arg: resolveTerm(t.arg, params, names) };
+      return { tag: "App", fn: rec(t.fn, params), arg: rec(t.arg, params) };
     case "BinOp":
-      return {
-        tag: "BinOp",
-        op: t.op,
-        left: resolveTerm(t.left, params, names),
-        right: resolveTerm(t.right, params, names),
-      };
+      return { tag: "BinOp", op: t.op, left: rec(t.left, params), right: rec(t.right, params) };
     case "If":
+      return { tag: "If", cond: rec(t.cond, params), then: rec(t.then, params), else: rec(t.else, params) };
+    case "Match":
       return {
-        tag: "If",
-        cond: resolveTerm(t.cond, params, names),
-        then: resolveTerm(t.then, params, names),
-        else: resolveTerm(t.else, params, names),
+        tag: "Match",
+        scrutinee: rec(t.scrutinee, params),
+        arms: t.arms.map((a) => resolveArm(a, params, names, registry, self)),
       };
   }
 }
 
-/** Resolve a whole definition. The new definition's own name is intentionally
- *  not in scope: recursion is out of scope for v1 because a self-reference
- *  would make the content hash ill-founded (its hash would depend on itself). */
-export function resolveDef(d: SurfaceDef, names: Map<string, Hash>): CoreDef {
+function resolveArm(
+  arm: SurfaceArm,
+  params: Set<string>,
+  names: Map<string, Hash>,
+  registry: Registry,
+  self: string | undefined,
+): MatchArm {
+  const c = registry.ctors.get(arm.ctor);
+  if (!c) throw new StrandResolveError(`unknown constructor '${arm.ctor}'`);
+  if (arm.vars.length !== c.ctor.fields.length) {
+    throw new StrandResolveError(`constructor '${arm.ctor}' takes ${c.ctor.fields.length} fields, got ${arm.vars.length}`);
+  }
+  const inner = new Set([...params, ...arm.vars]);
+  return { ctor: arm.ctor, vars: arm.vars, body: resolveTerm(arm.body, inner, names, registry, self) };
+}
+
+/** Resolve a value definition. Its own name is in scope as `Self` (recursion). */
+export function resolveDef(d: SurfaceDef, names: Map<string, Hash>, registry: Registry): CoreDef {
   const params = new Set(d.params.map((p) => p.name));
   return {
     params: d.params.map((p) => ({ name: p.name, ty: p.ty })),
     ret: d.ret,
-    body: resolveTerm(d.body, params, names),
+    body: resolveTerm(d.body, params, names, registry, d.name),
   };
+}
+
+/** A `data` declaration resolves directly — its field types are already types. */
+export function resolveData(d: SurfaceDataDecl): DataDecl {
+  return { name: d.name, params: d.params, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields })) };
 }

@@ -1,0 +1,20 @@
+# A real Strand program (depends on the prelude): quicksort and a small
+# arithmetic-expression evaluator over an algebraic data type.
+
+def lt (h: Int) (x: Int) -> Bool = x < h
+def gte (h: Int) (x: Int) -> Bool = if x < h then false else true
+
+def qsort (xs: List Int) -> List Int =
+  match xs {
+    Nil -> Nil
+  | Cons h t -> append (qsort (filter (lt h) t)) (Cons h (qsort (filter (gte h) t)))
+  }
+
+data Expr = Num Int | Add Expr Expr | Mul Expr Expr
+
+def evalExpr (e: Expr) -> Int =
+  match e {
+    Num n -> n
+  | Add a b -> evalExpr a + evalExpr b
+  | Mul a b -> evalExpr a * evalExpr b
+  }

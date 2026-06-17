@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { StrandError } from "./errors.ts";
-import { compileProgram, evalQuery } from "./pipeline.ts";
+import { compileProgram, dataDeclsOf, evalQuery, registryOf, valueNamesOf } from "./pipeline.ts";
 import { merge, resolveConflict } from "./merge.ts";
+import { typecheckNamespace } from "./core/check.ts";
 import { namesOf, projectNamespace, renderDef } from "./project.ts";
 import { emitModule } from "./backend/emit_ts.ts";
 import { valueToString } from "./core/eval.ts";
@@ -80,8 +81,13 @@ function main(argv: string[]): number {
       const src = opts.code ?? (opts.file ? readFileSync(opts.file, "utf8") : undefined);
       if (src === undefined) throw new StrandError("submit needs --file <path> or --code \"<src>\"");
       const repo = loadRepo(root);
-      const binds = compileProgram(src, repo.store, namespaceNames(repo.namespace));
-      repo.pending.push({ by, intent, binds });
+      const binds = compileProgram(
+        src,
+        repo.store,
+        valueNamesOf(repo.namespace, repo.store),
+        dataDeclsOf(repo.namespace, repo.store),
+      );
+      repo.pending.push({ by, intent, binds: binds.map((b) => ({ name: b.name, hash: b.hash })) });
       saveRepo(root, repo);
       console.log(`submitted by ${by}: ${binds.map((b) => `${b.name}=${b.hash}`).join(", ")}`);
       return 0;
@@ -98,7 +104,14 @@ function main(argv: string[]): number {
       console.log(`applied  : ${result.applied.sort().join(", ") || "none"}`);
       console.log(`conflicts: ${result.conflicts.map((c) => c.name).join(", ") || "none"}`);
       console.log(`rejected : ${result.rejected.map((r) => `${r.name}(${r.reason})`).join(", ") || "none"}`);
-      return result.conflicts.length > 0 ? 2 : 0;
+      const red = typecheckNamespace(repo.namespace, repo.store);
+      if (red.length > 0) {
+        console.log(`green-gate: RED — ${red.map((r) => r.name).join(", ")}`);
+        for (const r of red) console.log(`  ${r.name}: ${r.error}`);
+      } else {
+        console.log(`green-gate: green`);
+      }
+      return result.conflicts.length > 0 || red.length > 0 ? 2 : 0;
     }
 
     case "ls": {
@@ -124,7 +137,11 @@ function main(argv: string[]): number {
       const expr = positionals[1];
       if (!expr) throw new StrandError('eval needs an expression, e.g. eval "double 21"');
       const repo = loadRepo(root);
-      console.log(valueToString(evalQuery(expr, repo.store, namespaceNames(repo.namespace))));
+      console.log(
+        valueToString(
+          evalQuery(expr, repo.store, valueNamesOf(repo.namespace, repo.store), registryOf(repo.namespace, repo.store)),
+        ),
+      );
       return 0;
     }
 

@@ -1,14 +1,21 @@
 import { StrandEvalError } from "../errors.ts";
+import type { Registry } from "./registry.ts";
 import type { Store } from "./store.ts";
 import type { BinOp, CoreDef, CoreTerm } from "./term.ts";
 
-/** Runtime values. A partially-applied definition is a Closure carrying the
- *  arguments gathered so far. */
+/** Runtime values. A partially-applied function is a Closure; a partially-applied
+ *  constructor is a Ctor; a fully-applied constructor is a Data value. */
 export type Value =
   | { tag: "Int"; value: number }
   | { tag: "Bool"; value: boolean }
   | { tag: "Text"; value: string }
-  | { tag: "Closure"; def: CoreDef; applied: Value[] };
+  | { tag: "Closure"; def: CoreDef; applied: Value[] }
+  | { tag: "Ctor"; ctor: string; arity: number; args: Value[] }
+  | { tag: "Data"; ctor: string; fields: Value[] };
+
+function atom(v: Value): string {
+  return v.tag === "Data" && v.fields.length > 0 ? `(${valueToString(v)})` : valueToString(v);
+}
 
 export function valueToString(v: Value): string {
   switch (v.tag) {
@@ -20,10 +27,25 @@ export function valueToString(v: Value): string {
       return JSON.stringify(v.value);
     case "Closure":
       return `<fn/${v.def.params.length - v.applied.length}>`;
+    case "Ctor":
+      return `<ctor ${v.ctor}/${v.arity - v.args.length}>`;
+    case "Data":
+      return v.fields.length ? `${v.ctor} ${v.fields.map(atom).join(" ")}` : v.ctor;
   }
 }
 
+function structuralEq(a: Value, b: Value): boolean {
+  if (a.tag !== b.tag) return false;
+  if (a.tag === "Data" && b.tag === "Data") {
+    return a.ctor === b.ctor && a.fields.length === b.fields.length && a.fields.every((x, i) => structuralEq(x, b.fields[i]));
+  }
+  if (a.tag === "Int" || a.tag === "Bool" || a.tag === "Text") return a.value === (b as { value: unknown }).value;
+  return false;
+}
+
 function computeBinOp(op: BinOp, l: Value, r: Value): Value {
+  if (op === "++") return { tag: "Text", value: (l as { value: string }).value + (r as { value: string }).value };
+  if (op === "==") return { tag: "Bool", value: structuralEq(l, r) };
   const li = (l as { value: number }).value;
   const ri = (r as { value: number }).value;
   switch (op) {
@@ -37,23 +59,33 @@ function computeBinOp(op: BinOp, l: Value, r: Value): Value {
       return { tag: "Bool", value: li < ri };
     case ">":
       return { tag: "Bool", value: li > ri };
-    case "==":
-      return { tag: "Bool", value: (l as { value: unknown }).value === (r as { value: unknown }).value };
   }
+  throw new StrandEvalError(`bad operator ${op}`);
 }
 
-function apply(fn: Value, arg: Value, store: Store): Value {
+function apply(fn: Value, arg: Value, store: Store, registry: Registry): Value {
+  if (fn.tag === "Ctor") {
+    const args = [...fn.args, arg];
+    if (args.length < fn.arity) return { tag: "Ctor", ctor: fn.ctor, arity: fn.arity, args };
+    return { tag: "Data", ctor: fn.ctor, fields: args };
+  }
   if (fn.tag !== "Closure") throw new StrandEvalError("applied a non-function value");
   const applied = [...fn.applied, arg];
   if (applied.length < fn.def.params.length) return { tag: "Closure", def: fn.def, applied };
   const env = new Map<string, Value>();
   fn.def.params.forEach((p, i) => env.set(p.name, applied[i]));
-  return evalTerm(fn.def.body, env, store);
+  return evalTerm(fn.def.body, env, store, registry, fn.def);
 }
 
-/** Evaluate a core term. Parameters come from `env`; definition references are
- *  fetched from the store by hash — evaluation, like typing, follows identity. */
-export function evalTerm(t: CoreTerm, env: Map<string, Value>, store: Store): Value {
+/** Evaluate a core term. */
+export function evalTerm(
+  t: CoreTerm,
+  env: Map<string, Value>,
+  store: Store,
+  registry: Registry,
+  selfDef?: CoreDef,
+): Value {
+  const rec = (s: CoreTerm, e: Map<string, Value>): Value => evalTerm(s, e, store, registry, selfDef);
   switch (t.tag) {
     case "IntLit":
       return { tag: "Int", value: t.value };
@@ -61,24 +93,41 @@ export function evalTerm(t: CoreTerm, env: Map<string, Value>, store: Store): Va
       return { tag: "Bool", value: t.value };
     case "TextLit":
       return { tag: "Text", value: t.value };
+    case "Self":
+      if (!selfDef) throw new StrandEvalError("`Self` used outside a definition");
+      return { tag: "Closure", def: selfDef, applied: [] };
     case "Var": {
       const v = env.get(t.name);
       if (!v) throw new StrandEvalError(`unbound variable '${t.name}'`);
       return v;
     }
     case "Ref": {
-      const sd = store.get(t.hash);
-      if (!sd) throw new StrandEvalError(`dangling reference ${t.hash}`);
-      if (sd.def.params.length === 0) return evalTerm(sd.def.body, new Map(), store);
-      return { tag: "Closure", def: sd.def, applied: [] };
+      const def = store.defOf(t.hash);
+      if (!def) throw new StrandEvalError(`dangling reference ${t.hash}`);
+      if (def.params.length === 0) return evalTerm(def.body, new Map(), store, registry, def);
+      return { tag: "Closure", def, applied: [] };
+    }
+    case "Ctor": {
+      const c = registry.ctors.get(t.ctor);
+      if (!c) throw new StrandEvalError(`unknown constructor '${t.ctor}'`);
+      const arity = c.ctor.fields.length;
+      if (arity === 0) return { tag: "Data", ctor: t.ctor, fields: [] };
+      return { tag: "Ctor", ctor: t.ctor, arity, args: [] };
     }
     case "App":
-      return apply(evalTerm(t.fn, env, store), evalTerm(t.arg, env, store), store);
+      return apply(rec(t.fn, env), rec(t.arg, env), store, registry);
     case "BinOp":
-      return computeBinOp(t.op, evalTerm(t.left, env, store), evalTerm(t.right, env, store));
+      return computeBinOp(t.op, rec(t.left, env), rec(t.right, env));
     case "If":
-      return (evalTerm(t.cond, env, store) as { value: boolean }).value
-        ? evalTerm(t.then, env, store)
-        : evalTerm(t.else, env, store);
+      return (rec(t.cond, env) as { value: boolean }).value ? rec(t.then, env) : rec(t.else, env);
+    case "Match": {
+      const s = rec(t.scrutinee, env);
+      if (s.tag !== "Data") throw new StrandEvalError("match on a non-data value");
+      const arm = t.arms.find((a) => a.ctor === s.ctor);
+      if (!arm) throw new StrandEvalError(`no match arm for constructor '${s.ctor}'`);
+      const env2 = new Map(env);
+      arm.vars.forEach((v, i) => env2.set(v, s.fields[i]));
+      return rec(arm.body, env2);
+    }
   }
 }

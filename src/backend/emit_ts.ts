@@ -1,8 +1,10 @@
 import type { Store } from "../core/store.ts";
-import { depsOf, type CoreTerm, type Hash } from "../core/term.ts";
+import { depsOf, type CoreTerm, type DataDecl, type Hash } from "../core/term.ts";
 import type { Ty } from "../core/types.ts";
 import type { Namespace } from "../model.ts";
 import { namesOf } from "../project.ts";
+
+let matchCounter = 0;
 
 function tsType(t: Ty): string {
   switch (t.tag) {
@@ -12,20 +14,27 @@ function tsType(t: Ty): string {
       return "boolean";
     case "Text":
       return "string";
+    case "Var":
+      return t.name;
+    case "Flex":
+      return "unknown";
+    case "Con":
+      return t.args.length ? `${t.name}<${t.args.map(tsType).join(", ")}>` : t.name;
     case "Fun":
       return `(x: ${tsType(t.from)}) => ${tsType(t.to)}`;
   }
 }
 
-const TS_OP: Record<string, string> = { "+": "+", "-": "-", "*": "*", "<": "<", ">": ">", "==": "===" };
+const TS_OP: Record<string, string> = {
+  "+": "+", "-": "-", "*": "*", "<": "<", ">": ">", "==": "===", "++": "+",
+};
 
-/** The TS identifier for a hash: its bound name if it has one, else a stable
- *  synthetic name derived from the hash (for anonymous intermediate content). */
 function tsName(hash: Hash, nameOf: Map<Hash, string>): string {
   return nameOf.get(hash) ?? "_h" + hash.replace(/[^A-Za-z0-9]/g, "");
 }
 
-function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>): string {
+function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string): string {
+  const e = (s: CoreTerm): string => emitTerm(s, nameOf, selfName);
   switch (t.tag) {
     case "IntLit":
       return String(t.value);
@@ -33,57 +42,101 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>): string {
       return String(t.value);
     case "TextLit":
       return JSON.stringify(t.value);
+    case "Self":
+      return selfName;
     case "Var":
       return t.name;
     case "Ref":
       return tsName(t.hash, nameOf);
+    case "Ctor":
+      return t.ctor;
     case "App":
-      return `${emitTerm(t.fn, nameOf)}(${emitTerm(t.arg, nameOf)})`;
+      return `${e(t.fn)}(${e(t.arg)})`;
     case "BinOp":
-      return `(${emitTerm(t.left, nameOf)} ${TS_OP[t.op]} ${emitTerm(t.right, nameOf)})`;
+      return `(${e(t.left)} ${TS_OP[t.op]} ${e(t.right)})`;
     case "If":
-      return `(${emitTerm(t.cond, nameOf)} ? ${emitTerm(t.then, nameOf)} : ${emitTerm(t.else, nameOf)})`;
+      return `(${e(t.cond)} ? ${e(t.then)} : ${e(t.else)})`;
+    case "Match": {
+      const s = `$s${matchCounter++}`;
+      const arms = t.arms
+        .map((arm) => {
+          const binds = arm.vars.map((v, i) => `const ${v} = ${s}.f${i};`).join(" ");
+          return `if (${s}.tag === ${JSON.stringify(arm.ctor)}) { ${binds} return ${e(arm.body)}; }`;
+        })
+        .join(" ");
+      return `(() => { const ${s} = ${e(t.scrutinee)}; ${arms} throw new Error("non-exhaustive match"); })()`;
+    }
   }
 }
 
-function emitDef(name: string, hash: Hash, store: Store, nameOf: Map<Hash, string>): string {
-  const sd = store.get(hash)!;
-  const body = emitTerm(sd.def.body, nameOf);
-  if (sd.def.params.length === 0) {
-    return `export const ${name}: ${tsType(sd.def.ret)} = ${body};`;
+/** A data declaration becomes a TS discriminated-union type plus a constructor
+ *  for each variant (a value for nullary ones, a curried function otherwise). */
+function emitData(decl: DataDecl): string {
+  const variants = decl.ctors
+    .map((c) => {
+      const fields = c.fields.map((f, i) => `f${i}: ${tsType(f)}`).join("; ");
+      return `{ tag: "${c.name}"${fields ? "; " + fields : ""} }`;
+    })
+    .join(" | ");
+  const params = decl.params.length ? `<${decl.params.join(", ")}>` : "";
+  const lines = [`export type ${decl.name}${params} = ${variants};`];
+  for (const c of decl.ctors) {
+    if (c.fields.length === 0) {
+      lines.push(`export const ${c.name} = { tag: "${c.name}" } as const;`);
+      continue;
+    }
+    const ps = c.fields.map((_, i) => `f${i}`);
+    let cur = `({ tag: "${c.name}", ${ps.join(", ")} })`;
+    for (let i = ps.length - 1; i >= 0; i--) cur = `(${ps[i]}) => ${cur}`;
+    lines.push(`export const ${c.name} = ${cur};`);
   }
-  const ps = sd.def.params;
-  let s = `(${ps[ps.length - 1].name}: ${tsType(ps[ps.length - 1].ty)}): ${tsType(sd.def.ret)} => ${body}`;
+  return lines.join("\n");
+}
+
+function emitDef(name: string, hash: Hash, store: Store, nameOf: Map<Hash, string>): string {
+  const def = store.defOf(hash)!;
+  const body = emitTerm(def.body, nameOf, name);
+  if (def.params.length === 0) return `export const ${name}: ${tsType(def.ret)} = ${body};`;
+  const ps = def.params;
+  let s = `(${ps[ps.length - 1].name}: ${tsType(ps[ps.length - 1].ty)}): ${tsType(def.ret)} => ${body}`;
   for (let i = ps.length - 2; i >= 0; i--) s = `(${ps[i].name}: ${tsType(ps[i].ty)}) => ${s}`;
   return `export const ${name} = ${s};`;
 }
 
-/** Transpile a whole namespace to a self-contained TypeScript module. Content
- *  is emitted in dependency order (a definition appears before its users), and
- *  every namespace name resolves to a `const`. This output is both runnable via
- *  the Node/TS toolchain and the faithful human-readable projection of the
- *  content-addressed graph. */
+/** Transpile a whole namespace to a self-contained TypeScript module: data
+ *  declarations and their constructors first, then value definitions in
+ *  dependency order. */
 export function emitModule(namespace: Namespace, store: Store): string {
   const nameOf = namesOf(namespace);
+
+  const dataLines: string[] = [];
+  const seenData = new Set<Hash>();
+  for (const b of namespace.values()) {
+    const d = store.dataOf(b.hash);
+    if (d && !seenData.has(b.hash)) {
+      seenData.add(b.hash);
+      dataLines.push(emitData(d));
+    }
+  }
+
   const order: Hash[] = [];
   const seen = new Set<Hash>();
   const visit = (h: Hash): void => {
     if (seen.has(h)) return;
     seen.add(h);
-    const sd = store.get(h);
-    if (!sd) return;
-    for (const d of depsOf(sd.def.body)) visit(d);
+    const def = store.defOf(h);
+    if (!def) return;
+    for (const d of depsOf(def.body)) visit(d);
     order.push(h);
   };
-  for (const [, b] of namespace) visit(b.hash);
+  for (const [, b] of namespace) if (store.defOf(b.hash)) visit(b.hash);
 
-  const lines = order.map((h) => emitDef(tsName(h, nameOf), h, store, nameOf));
-
-  // Alias any namespace name that isn't the canonical name chosen for its hash.
+  const defLines = order.map((h) => emitDef(tsName(h, nameOf), h, store, nameOf));
   for (const [name, b] of namespace) {
+    if (!store.defOf(b.hash)) continue;
     const canonical = tsName(b.hash, nameOf);
-    if (canonical !== name) lines.push(`export const ${name} = ${canonical};`);
+    if (canonical !== name) defLines.push(`export const ${name} = ${canonical};`);
   }
 
-  return `// Generated by Strand — transpiled projection of the namespace.\n${lines.join("\n")}\n`;
+  return `// Generated by Strand — transpiled projection of the namespace.\n${[...dataLines, ...defLines].join("\n")}\n`;
 }

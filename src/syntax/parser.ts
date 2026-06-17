@@ -1,12 +1,12 @@
 import { StrandSyntaxError } from "../errors.ts";
-import { tBool, tInt, tText, tFun, type Ty } from "../core/types.ts";
+import { tBool, tCon, tInt, tText, tFun, tVar, type Ty } from "../core/types.ts";
 import type { BinOp } from "../core/term.ts";
 import { lex, type Token } from "./lexer.ts";
-import type { SurfaceDef, SurfaceParam, SurfaceTerm } from "./ast.ts";
+import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceItem, SurfaceParam, SurfaceTerm } from "./ast.ts";
 
-// Keywords that may NOT be used as a plain name in an expression — they
-// terminate juxtaposition-based application.
-const RESERVED = new Set(["def", "if", "then", "else"]);
+const RESERVED = new Set(["def", "data", "if", "then", "else", "match"]);
+
+const isUpper = (s: string): boolean => /^[A-Z]/.test(s);
 
 class Parser {
   private i = 0;
@@ -47,12 +47,12 @@ class Parser {
     return t.value;
   }
 
-  // --- programs & definitions ---
+  // --- programs & items ---
 
-  parseProgram(): SurfaceDef[] {
-    const defs: SurfaceDef[] = [];
-    while (!this.atEof()) defs.push(this.parseDef());
-    return defs;
+  parseProgram(): SurfaceItem[] {
+    const items: SurfaceItem[] = [];
+    while (!this.atEof()) items.push(this.isKw("data") ? this.parseData() : this.parseDef());
+    return items;
   }
 
   private parseDef(): SurfaceDef {
@@ -64,7 +64,7 @@ class Parser {
     const ret = this.parseType();
     this.eatSym("=");
     const body = this.parseExpr();
-    return { name, params, ret, body };
+    return { kind: "def", name, params, ret, body };
   }
 
   private parseParam(): SurfaceParam {
@@ -76,41 +76,74 @@ class Parser {
     return { name, ty };
   }
 
-  // --- types (function arrow is right-associative) ---
-
-  parseType(): Ty {
-    const left = this.parseAType();
-    if (this.isSym("->")) {
+  private parseData(): SurfaceDataDecl {
+    this.eatKw("data");
+    const name = this.eatIdent();
+    const params: string[] = [];
+    while (this.peek().kind === "ident" && !RESERVED.has(this.peek().value)) params.push(this.eatIdent());
+    this.eatSym("=");
+    const ctors = [this.parseCtor()];
+    while (this.isSym("|")) {
       this.next();
-      return tFun(left, this.parseType());
+      ctors.push(this.parseCtor());
     }
-    return left;
+    return { kind: "data", name, params, ctors };
   }
 
-  private parseAType(): Ty {
-    if (this.isKw("Int")) {
+  private parseCtor(): { name: string; fields: Ty[] } {
+    const name = this.eatIdent();
+    const fields: Ty[] = [];
+    while (this.canStartAtomicType()) fields.push(this.parseAtomicType());
+    return { name, fields };
+  }
+
+  // --- types ---
+
+  parseType(): Ty {
+    const head = this.parseTypeApp();
+    if (this.isSym("->")) {
       this.next();
-      return tInt;
+      return tFun(head, this.parseType());
     }
-    if (this.isKw("Bool")) {
-      this.next();
-      return tBool;
+    return head;
+  }
+
+  private parseTypeApp(): Ty {
+    const head = this.parseAtomicType();
+    const args: Ty[] = [];
+    while (this.canStartAtomicType()) args.push(this.parseAtomicType());
+    if (args.length === 0) return head;
+    if (head.tag !== "Con" || head.args.length > 0) {
+      throw new StrandSyntaxError(`only a type constructor can be applied to arguments`, this.peek().pos);
     }
-    if (this.isKw("Text")) {
-      this.next();
-      return tText;
-    }
-    if (this.isSym("(")) {
-      this.next();
-      const t = this.parseType();
-      this.eatSym(")");
-      return t;
-    }
+    return tCon(head.name, args);
+  }
+
+  private canStartAtomicType(): boolean {
     const t = this.peek();
+    if (t.kind === "ident") return !RESERVED.has(t.value);
+    return t.kind === "sym" && t.value === "(";
+  }
+
+  private parseAtomicType(): Ty {
+    const t = this.peek();
+    if (t.kind === "ident") {
+      this.next();
+      if (t.value === "Int") return tInt;
+      if (t.value === "Bool") return tBool;
+      if (t.value === "Text") return tText;
+      return isUpper(t.value) ? tCon(t.value, []) : tVar(t.value);
+    }
+    if (t.kind === "sym" && t.value === "(") {
+      this.next();
+      const ty = this.parseType();
+      this.eatSym(")");
+      return ty;
+    }
     throw new StrandSyntaxError(`expected a type, got '${t.value || t.kind}'`, t.pos);
   }
 
-  // --- expressions (precedence: if > cmp > +/- > * > application > atom) ---
+  // --- expressions (if/match > cmp > +/-/++ > * > application > atom) ---
 
   parseExpr(): SurfaceTerm {
     if (this.isKw("if")) {
@@ -122,7 +155,29 @@ class Parser {
       const els = this.parseExpr();
       return { tag: "If", cond, then, else: els };
     }
+    if (this.isKw("match")) return this.parseMatch();
     return this.parseCmp();
+  }
+
+  private parseMatch(): SurfaceTerm {
+    this.eatKw("match");
+    const scrutinee = this.parseExpr();
+    this.eatSym("{");
+    const arms: SurfaceArm[] = [this.parseArm()];
+    while (this.isSym("|")) {
+      this.next();
+      arms.push(this.parseArm());
+    }
+    this.eatSym("}");
+    return { tag: "Match", scrutinee, arms };
+  }
+
+  private parseArm(): SurfaceArm {
+    const ctor = this.eatIdent();
+    const vars: string[] = [];
+    while (this.peek().kind === "ident" && !RESERVED.has(this.peek().value)) vars.push(this.eatIdent());
+    this.eatSym("->");
+    return { ctor, vars, body: this.parseExpr() };
   }
 
   private parseCmp(): SurfaceTerm {
@@ -136,7 +191,7 @@ class Parser {
 
   private parseAdd(): SurfaceTerm {
     let left = this.parseMul();
-    while (this.isSym("+") || this.isSym("-")) {
+    while (this.isSym("+") || this.isSym("-") || this.isSym("++")) {
       const op = this.next().value as BinOp;
       left = { tag: "BinOp", op, left, right: this.parseMul() };
     }
@@ -199,14 +254,10 @@ class Parser {
   }
 }
 
-/** Parse a whole program (zero or more `def`s). */
-export function parseProgram(src: string): SurfaceDef[] {
-  const p = new Parser(lex(src));
-  const defs = p.parseProgram();
-  return defs;
+export function parseProgram(src: string): SurfaceItem[] {
+  return new Parser(lex(src)).parseProgram();
 }
 
-/** Parse a single expression — used to evaluate ad-hoc queries. */
 export function parseExpr(src: string): SurfaceTerm {
   const p = new Parser(lex(src));
   const e = p.parseExpr();

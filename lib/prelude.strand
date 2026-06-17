@@ -1,0 +1,27 @@
+# Strand prelude — core data types and list utilities, written in Strand itself.
+
+data List a = Nil | Cons a (List a)
+data Option a = None | Some a
+data Pair a b = Pair a b
+
+def add (a: Int) (b: Int) -> Int = a + b
+
+def length (xs: List a) -> Int =
+  match xs { Nil -> 0 | Cons h t -> 1 + length t }
+
+def append (xs: List a) (ys: List a) -> List a =
+  match xs { Nil -> ys | Cons h t -> Cons h (append t ys) }
+
+def map (f: a -> b) (xs: List a) -> List b =
+  match xs { Nil -> Nil | Cons h t -> Cons (f h) (map f t) }
+
+def filter (p: a -> Bool) (xs: List a) -> List a =
+  match xs { Nil -> Nil | Cons h t -> if p h then Cons h (filter p t) else filter p t }
+
+def foldr (f: a -> b -> b) (z: b) (xs: List a) -> b =
+  match xs { Nil -> z | Cons h t -> f h (foldr f z t) }
+
+def sum (xs: List Int) -> Int = foldr add 0 xs
+
+def range (n: Int) -> List Int =
+  if n < 1 then Nil else append (range (n - 1)) (Cons n Nil)
