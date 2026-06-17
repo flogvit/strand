@@ -135,6 +135,28 @@ Bevisst utenfor v1: rekursjon (selvreferanse gjør hashen ill-fundert), type-inf
 eksplisitte), standardbibliotek, og — størst — *symbol-nivå koordinering på tvers av agenter* (det
 udekkede rommet fra prior-art). Det er neste kile.
 
+## Strand v2 — ET EKTE SPRÅK (Turing-komplett, generelt)
+
+Kontrakten ble skjerpet: et ekte, generelt språk man strengt tatt kan skrive et hvilket som helst
+program i, transpilert til TS, trygt for mange agenter. Bygget i sju steg, alle med tester (64/64 grønt):
+
+1. **Rekursjon** (`Self`-node, well-founded hash) → Turing-komplett.
+2. **Generiske ADT-er** (sum-typer; produkter = enkelt-konstruktør), **pattern matching**, og et
+   **unifikasjons-basert typesystem** (generics). `data List a = Nil | Cons a (List a)`, `match`.
+3. **Tekst** (`++`).
+4. Minimal I/O: programmer beregner verdier, `run`/`eval` skriver dem ut (ekte side-effekter utenfor v2).
+5. **Prelude i Strand selv** (`lib/prelude.strand`): map/filter/foldr/length/append/range/sum.
+6. **Hel-namespace grønn-gate ved merge**: fanger at en type-rebind gjør en grønn def rød.
+7. **Ferdig-kriteriet**: et ekte program (`examples/program.strand` — quicksort + uttrykks-evaluator
+   over ADT) kjører både tolket og transpilert, med identisk resultat.
+
+Transpilerings-strategien (din idé) betyr at vi aldri skrev en egen kompilator/kjøretid — Strand
+blir til lesbar TS som Node kjører. Interpreteren er bare referanse-orakel for testene.
+
+Ærlige begrensninger: ingen side-effekt-I/O, ingen type-inferens (eksplisitte signaturer), flat
+namespace (ingen moduler), kun selv-rekursjon (ikke gjensidig), og typer refereres ved navn (ikke
+ved identitet slik verdier gjør).
+
 ## Strand over TypeScript — BYGGET (den brukelige veien)
 
 Leketøys-språket beviste substratet, men var ubrukelig til ekte programmer. Derfor kjører nå

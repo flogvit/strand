@@ -71,21 +71,53 @@ name-based language cannot give for free is *reference by identity* — TypeScri
 resolves references by name, so a rename is not transparent to callers the way
 it is in the Strand language. That is the honest "most of it, not all" trade.
 
-## The language (v1)
+## The language
+
+A small but general-purpose, statically-typed functional language. It is
+Turing-complete and transpiles to TypeScript — the reference interpreter and the
+transpiled TS produce the same value, so Strand needs no compiler of its own.
 
 ```
-def add (a: Int) (b: Int) -> Int = a + b
-def max (a: Int) (b: Int) -> Int = if a < b then b else a
-def twice (f: Int -> Int) (n: Int) -> Int = f (f n)
+# recursion
+def fac (n: Int) -> Int = if n < 1 then 1 else n * fac (n - 1)
+
+# generic algebraic data types + pattern matching
+data List a = Nil | Cons a (List a)
+def length (xs: List a) -> Int = match xs { Nil -> 0 | Cons h t -> 1 + length t }
+def map (f: a -> b) (xs: List a) -> List b =
+  match xs { Nil -> Nil | Cons h t -> Cons (f h) (map f t) }
+
+# text
+def greet (name: Text) -> Text = "Hello, " ++ name
 ```
 
-Ground types `Int`, `Bool`, `Text`; curried functions; `+ - *`, `== < >`,
-`if/then/else`; juxtaposition application. Definitions run on a reference
-interpreter and transpile to TypeScript (the same value out of both).
+- Ground types `Int`, `Bool`, `Text`; curried functions; type constructors
+  (`List a`, `Option a`) and type variables — generics checked by unification.
+- `data` declarations (sum types; products are single-constructor data), `match`
+  with constructor patterns, recursion, `if/then/else`, `+ - * ++`, `== < >`,
+  juxtaposition application.
+- A prelude (`lib/prelude.strand`) — `List`, `Option`, `map`, `filter`, `foldr`,
+  `length`, `append`, `range`, `sum` — written in Strand itself.
+- A real example (`examples/program.strand`): quicksort and an
+  arithmetic-expression evaluator over an ADT.
+
+```bash
+npm run strand -- init
+npm run strand -- submit --as alice --intent prelude --file lib/prelude.strand
+npm run strand -- merge
+npm run strand -- submit --as bob --intent program --file examples/program.strand
+npm run strand -- merge
+npm run strand -- eval "qsort (Cons 3 (Cons 1 (Cons 2 Nil)))"          # Cons 1 (Cons 2 (Cons 3 Nil))
+npm run strand -- eval "evalExpr (Add (Num 2) (Mul (Num 3) (Num 4)))"  # 14
+```
 
 ## Status & limits
 
-A working prototype, not a production language. Deliberately out of scope for
-v1: recursion (a self-reference would make the content hash ill-founded),
-type inference (signatures are explicit), and a standard library. The next wedge
-is symbol-level coordination on top of this substrate — see `concept.md`.
+A working language, not (yet) a production one. The conflict-free substrate
+covers every definition — values *and* types — and whole-namespace type-checking
+runs at merge, so a type rebind that would turn a green definition red is caught.
+
+Deliberately out of scope for now: side-effecting I/O (programs compute values;
+`eval`/`run` print them), type inference (signatures are explicit), modules
+beyond the flat namespace, and mutual recursion (self-recursion is supported).
+Value references are by content hash (identity); type references are by name.
