@@ -5,7 +5,12 @@
   "description": "Strand — content-addressed, conflict-free substrate for parallel agent authoring (wedge 1 prototype)",
   "scripts": {
     "strand": "tsx src/cli.ts",
+    "strand-ts": "tsx src/ts/cli.ts",
     "demo": "bash examples/swarm.sh",
+    "demo:ts": "bash examples/ts-swarm.sh",
     "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "typescript": "^6.0.3"
   }
 }
