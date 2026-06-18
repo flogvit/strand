@@ -5,6 +5,7 @@ import { StrandError } from "./errors.ts";
 import { compileProgram, dataDeclsOf, evalQuery, registryOf, valueNamesOf } from "./pipeline.ts";
 import { parseProgram } from "./syntax/parser.ts";
 import { printProgram } from "./syntax/print.ts";
+import { depsOf } from "./core/term.ts";
 import { merge, resolveConflict } from "./merge.ts";
 import { typecheckNamespace } from "./core/check.ts";
 import { namesOf, projectNamespace, renderDef } from "./project.ts";
@@ -47,6 +48,8 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand show <name>
   strand eval "<expr>"
   strand fmt <file.strand> [--write]   # pretty-print Strand source
+  strand test                  # run all zero-arg Bool definitions as tests
+  strand untested              # definitions not reached by any test
   strand run <name>            # transpile to TS and execute
   strand emit [--out <file>]   # transpile namespace to TypeScript
   strand pending
@@ -198,6 +201,56 @@ function main(argv: string[]): number {
       for (const tx of repo.pending) {
         console.log(`${tx.by}: ${tx.binds.map((b) => b.name).join(", ")} — ${tx.intent}`);
       }
+      return 0;
+    }
+
+    case "test": {
+      requireRepo(root);
+      const repo = loadRepo(root);
+      const names = valueNamesOf(repo.namespace, repo.store);
+      const registry = registryOf(repo.namespace, repo.store);
+      // a test is a zero-parameter definition of type Bool
+      const tests = [...repo.namespace].filter(([, b]) => {
+        const def = repo.store.defOf(b.hash);
+        const ty = repo.store.typeOf(b.hash);
+        return def && def.params.length === 0 && ty?.tag === "Bool";
+      });
+      let pass = 0;
+      let fail = 0;
+      for (const [name] of tests.sort((a, z) => a[0].localeCompare(z[0]))) {
+        const v = evalQuery(name, repo.store, names, registry);
+        const ok = v.tag === "Bool" && v.value;
+        console.log(`${ok ? "ok  " : "FAIL"} ${name}`);
+        ok ? pass++ : fail++;
+      }
+      console.log(`${pass} passed, ${fail} failed`);
+      return fail > 0 ? 1 : 0;
+    }
+
+    case "untested": {
+      requireRepo(root);
+      const repo = loadRepo(root);
+      const valueDefs = [...repo.namespace].filter(([, b]) => repo.store.defOf(b.hash));
+      const isTest = (h: Hash): boolean => {
+        const def = repo.store.defOf(h);
+        const ty = repo.store.typeOf(h);
+        return !!def && def.params.length === 0 && ty?.tag === "Bool";
+      };
+      // covered = the transitive dependency closure of the test definitions
+      const reachable = new Set<Hash>();
+      const visit = (h: Hash): void => {
+        if (reachable.has(h)) return;
+        reachable.add(h);
+        const def = repo.store.defOf(h);
+        if (def) for (const d of depsOf(def.body)) visit(d);
+      };
+      for (const [, b] of valueDefs) if (isTest(b.hash)) visit(b.hash);
+      const untested = valueDefs
+        .filter(([, b]) => !reachable.has(b.hash) && !isTest(b.hash))
+        .map(([n]) => n)
+        .sort();
+      if (untested.length === 0) console.log("all definitions are covered by a test");
+      else console.log("untested:\n" + untested.map((n) => `  ${n}`).join("\n"));
       return 0;
     }
 
