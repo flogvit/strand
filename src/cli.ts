@@ -8,7 +8,7 @@ import { printProgram } from "./syntax/print.ts";
 import { depsOf } from "./core/term.ts";
 import { merge, resolveConflict } from "./merge.ts";
 import { typecheckNamespace } from "./core/check.ts";
-import { namesOf, projectNamespace, renderDef } from "./project.ts";
+import { exportNamespace, namesOf, projectNamespace, renderDef } from "./project.ts";
 import { emitModule } from "./backend/emit_ts.ts";
 import { valueToString } from "./core/eval.ts";
 import { initRepo, loadRepo, repoExists, saveRepo } from "./persist.ts";
@@ -55,6 +55,7 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand verify                        # check all required checks are attested
   strand run <name>            # transpile to TS and execute
   strand emit [--out <file>]   # transpile namespace to TypeScript
+  strand export [--out <file>] # write the namespace as Strand source (for git)
   strand pending
   strand conflicts
   strand resolve <name> <hash>
@@ -171,6 +172,19 @@ function main(argv: string[]): number {
           evalQuery(expr, repo.store, valueNamesOf(repo.namespace, repo.store), registryOf(repo.namespace, repo.store)),
         ),
       );
+      return 0;
+    }
+
+    case "export": {
+      requireRepo(root);
+      const repo = loadRepo(root);
+      const src = exportNamespace(repo.namespace, repo.store);
+      if (opts.out) {
+        writeFileSync(opts.out, src);
+        console.log(`exported ${repo.namespace.size} definitions to ${opts.out}`);
+      } else {
+        process.stdout.write(src);
+      }
       return 0;
     }
 

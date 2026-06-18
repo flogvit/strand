@@ -1,5 +1,5 @@
 import type { Store } from "./core/store.ts";
-import type { CoreTerm, DataDecl, Hash } from "./core/term.ts";
+import { depsOf, type CoreTerm, type DataDecl, type Hash } from "./core/term.ts";
 import { tyToString } from "./core/types.ts";
 import type { Conflict, Namespace } from "./model.ts";
 
@@ -91,11 +91,48 @@ export function namesOf(namespace: Namespace): Map<Hash, string> {
 }
 
 function renderData(decl: DataDecl): string {
+  const first = decl.ctors[0];
+  if (decl.ctors.length === 1 && first.fieldNames) {
+    const fields = first.fieldNames.map((n, i) => `${n}: ${tyToString(first.fields[i])}`).join(", ");
+    return `record ${decl.name} { ${fields} }`;
+  }
   const head = [decl.name, ...decl.params].join(" ");
   const ctors = decl.ctors
     .map((c) => [c.name, ...c.fields.map((f) => (f.tag === "Con" && f.args.length ? `(${tyToString(f)})` : tyToString(f)))].join(" "))
     .join(" | ");
   return `data ${head} = ${ctors}`;
+}
+
+/** Render the whole namespace as canonical Strand source — data/record/foreign
+ *  declarations first, then value definitions in dependency order. This is the
+ *  git-committable, human-readable projection of the content-addressed graph. */
+export function exportNamespace(namespace: Namespace, store: Store): string {
+  const nameOf = namesOf(namespace);
+  const nameByHash = new Map([...namespace].map(([n, b]) => [b.hash, n]));
+
+  const dataLines: string[] = [];
+  const seenData = new Set<Hash>();
+  for (const [name, b] of namespace) {
+    if (store.dataOf(b.hash) && !seenData.has(b.hash)) {
+      seenData.add(b.hash);
+      dataLines.push(renderDef(name, b.hash, store, nameOf));
+    }
+  }
+
+  const order: Hash[] = [];
+  const seen = new Set<Hash>();
+  const visit = (h: Hash): void => {
+    if (seen.has(h)) return;
+    seen.add(h);
+    const def = store.defOf(h);
+    if (!def) return;
+    for (const d of depsOf(def.body)) visit(d);
+    order.push(h);
+  };
+  for (const [, b] of namespace) if (store.defOf(b.hash)) visit(b.hash);
+
+  const defLines = order.map((h) => renderDef(nameByHash.get(h) ?? h, h, store, nameOf));
+  return [...dataLines, ...defLines].join("\n\n") + "\n";
 }
 
 /** Render one stored item (value definition or data declaration) as source. */
