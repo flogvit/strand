@@ -94,8 +94,9 @@ def greet (name: Text) -> Text = "Hello, " ++ name
 - Ground types `Int`, `Bool`, `Text`; curried functions; type constructors
   (`List a`, `Option a`) and type variables — generics checked by unification.
 - `data` declarations (sum types; products are single-constructor data), `match`
-  with constructor patterns, recursion, `if/then/else`, `+ - * ++`, `== < >`,
-  juxtaposition application.
+  with constructor patterns, recursion, `if/then/else`, `let … in …`, lambdas
+  (`fn (x: T) -> …`, closures included), arithmetic `+ - * / %` and text `++`,
+  comparison `== < > <= >=`, boolean `&& ||`, juxtaposition application.
 - A prelude (`lib/prelude.strand`) — `List`, `Option`, `map`, `filter`, `foldr`,
   `length`, `append`, `range`, `sum` — written in Strand itself.
 - A real example (`examples/program.strand`): quicksort and an
