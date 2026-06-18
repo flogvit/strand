@@ -61,12 +61,17 @@ export function infer(
         u.unify(r, tText);
         return tText;
       }
-      if (t.op === "+" || t.op === "-" || t.op === "*") {
+      if (t.op === "&&" || t.op === "||") {
+        u.unify(l, tBool);
+        u.unify(r, tBool);
+        return tBool;
+      }
+      if (t.op === "+" || t.op === "-" || t.op === "*" || t.op === "/" || t.op === "%") {
         u.unify(l, tInt);
         u.unify(r, tInt);
         return tInt;
       }
-      if (t.op === "<" || t.op === ">") {
+      if (t.op === "<" || t.op === ">" || t.op === "<=" || t.op === ">=") {
         u.unify(l, tInt);
         u.unify(r, tInt);
         return tBool;
@@ -96,6 +101,17 @@ export function infer(
         u.unify(result, rec(arm.body, env2));
       }
       return result;
+    }
+    case "Let": {
+      const vt = rec(t.value, env);
+      const env2 = new Map(env);
+      env2.set(t.name, vt);
+      return rec(t.body, env2);
+    }
+    case "Lam": {
+      const env2 = new Map(env);
+      env2.set(t.param, t.paramTy);
+      return tFun(t.paramTy, rec(t.body, env2));
     }
   }
 }

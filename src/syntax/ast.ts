@@ -12,7 +12,9 @@ export type SurfaceTerm =
   | { tag: "App"; fn: SurfaceTerm; arg: SurfaceTerm }
   | { tag: "BinOp"; op: BinOp; left: SurfaceTerm; right: SurfaceTerm }
   | { tag: "If"; cond: SurfaceTerm; then: SurfaceTerm; else: SurfaceTerm }
-  | { tag: "Match"; scrutinee: SurfaceTerm; arms: SurfaceArm[] };
+  | { tag: "Match"; scrutinee: SurfaceTerm; arms: SurfaceArm[] }
+  | { tag: "Let"; name: string; value: SurfaceTerm; body: SurfaceTerm }
+  | { tag: "Lam"; param: string; paramTy: Ty; body: SurfaceTerm };
 
 export interface SurfaceArm {
   ctor: string;

@@ -41,6 +41,10 @@ export function resolveTerm(
         scrutinee: rec(t.scrutinee, params),
         arms: t.arms.map((a) => resolveArm(a, params, names, registry, self)),
       };
+    case "Let":
+      return { tag: "Let", name: t.name, value: rec(t.value, params), body: rec(t.body, new Set([...params, t.name])) };
+    case "Lam":
+      return { tag: "Lam", param: t.param, paramTy: t.paramTy, body: rec(t.body, new Set([...params, t.param])) };
   }
 }
 

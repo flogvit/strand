@@ -26,7 +26,8 @@ function tsType(t: Ty): string {
 }
 
 const TS_OP: Record<string, string> = {
-  "+": "+", "-": "-", "*": "*", "<": "<", ">": ">", "==": "===", "++": "+",
+  "+": "+", "-": "-", "*": "*", "%": "%", "<": "<", ">": ">", "<=": "<=", ">=": ">=",
+  "==": "===", "&&": "&&", "||": "||", "++": "+",
 };
 
 function tsName(hash: Hash, nameOf: Map<Hash, string>): string {
@@ -53,9 +54,14 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string): str
     case "App":
       return `${e(t.fn)}(${e(t.arg)})`;
     case "BinOp":
+      if (t.op === "/") return `Math.trunc(${e(t.left)} / ${e(t.right)})`;
       return `(${e(t.left)} ${TS_OP[t.op]} ${e(t.right)})`;
     case "If":
       return `(${e(t.cond)} ? ${e(t.then)} : ${e(t.else)})`;
+    case "Let":
+      return `((${t.name}) => ${e(t.body)})(${e(t.value)})`;
+    case "Lam":
+      return `(${t.param}) => ${e(t.body)}`;
     case "Match": {
       const s = `$s${matchCounter++}`;
       const arms = t.arms

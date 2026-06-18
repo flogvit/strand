@@ -3,13 +3,15 @@ import type { Registry } from "./registry.ts";
 import type { Store } from "./store.ts";
 import type { BinOp, CoreDef, CoreTerm } from "./term.ts";
 
-/** Runtime values. A partially-applied function is a Closure; a partially-applied
- *  constructor is a Ctor; a fully-applied constructor is a Data value. */
+/** Runtime values. A named function is a Closure; an anonymous function is a Lam
+ *  (capturing its environment); a partially-applied constructor is a Ctor; a
+ *  fully-applied constructor is a Data value. */
 export type Value =
   | { tag: "Int"; value: number }
   | { tag: "Bool"; value: boolean }
   | { tag: "Text"; value: string }
   | { tag: "Closure"; def: CoreDef; applied: Value[] }
+  | { tag: "Lam"; param: string; body: CoreTerm; env: Map<string, Value>; selfDef?: CoreDef }
   | { tag: "Ctor"; ctor: string; arity: number; args: Value[] }
   | { tag: "Data"; ctor: string; fields: Value[] };
 
@@ -27,6 +29,8 @@ export function valueToString(v: Value): string {
       return JSON.stringify(v.value);
     case "Closure":
       return `<fn/${v.def.params.length - v.applied.length}>`;
+    case "Lam":
+      return "<fn>";
     case "Ctor":
       return `<ctor ${v.ctor}/${v.arity - v.args.length}>`;
     case "Data":
@@ -46,6 +50,8 @@ function structuralEq(a: Value, b: Value): boolean {
 function computeBinOp(op: BinOp, l: Value, r: Value): Value {
   if (op === "++") return { tag: "Text", value: (l as { value: string }).value + (r as { value: string }).value };
   if (op === "==") return { tag: "Bool", value: structuralEq(l, r) };
+  if (op === "&&") return { tag: "Bool", value: (l as { value: boolean }).value && (r as { value: boolean }).value };
+  if (op === "||") return { tag: "Bool", value: (l as { value: boolean }).value || (r as { value: boolean }).value };
   const li = (l as { value: number }).value;
   const ri = (r as { value: number }).value;
   switch (op) {
@@ -55,10 +61,18 @@ function computeBinOp(op: BinOp, l: Value, r: Value): Value {
       return { tag: "Int", value: li - ri };
     case "*":
       return { tag: "Int", value: li * ri };
+    case "/":
+      return { tag: "Int", value: Math.trunc(li / ri) };
+    case "%":
+      return { tag: "Int", value: li % ri };
     case "<":
       return { tag: "Bool", value: li < ri };
     case ">":
       return { tag: "Bool", value: li > ri };
+    case "<=":
+      return { tag: "Bool", value: li <= ri };
+    case ">=":
+      return { tag: "Bool", value: li >= ri };
   }
   throw new StrandEvalError(`bad operator ${op}`);
 }
@@ -68,6 +82,11 @@ function apply(fn: Value, arg: Value, store: Store, registry: Registry): Value {
     const args = [...fn.args, arg];
     if (args.length < fn.arity) return { tag: "Ctor", ctor: fn.ctor, arity: fn.arity, args };
     return { tag: "Data", ctor: fn.ctor, fields: args };
+  }
+  if (fn.tag === "Lam") {
+    const env2 = new Map(fn.env);
+    env2.set(fn.param, arg);
+    return evalTerm(fn.body, env2, store, registry, fn.selfDef);
   }
   if (fn.tag !== "Closure") throw new StrandEvalError("applied a non-function value");
   const applied = [...fn.applied, arg];
@@ -129,5 +148,13 @@ export function evalTerm(
       arm.vars.forEach((v, i) => env2.set(v, s.fields[i]));
       return rec(arm.body, env2);
     }
+    case "Let": {
+      const v = rec(t.value, env);
+      const env2 = new Map(env);
+      env2.set(t.name, v);
+      return rec(t.body, env2);
+    }
+    case "Lam":
+      return { tag: "Lam", param: t.param, body: t.body, env: new Map(env), selfDef };
   }
 }

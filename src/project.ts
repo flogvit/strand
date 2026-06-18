@@ -7,14 +7,19 @@ function precedence(t: CoreTerm): number {
   switch (t.tag) {
     case "If":
     case "Match":
+    case "Let":
+    case "Lam":
       return 1;
     case "BinOp":
-      if (t.op === "==" || t.op === "<" || t.op === ">") return 2;
-      return t.op === "+" || t.op === "-" || t.op === "++" ? 3 : 4;
+      if (t.op === "||") return 2;
+      if (t.op === "&&") return 3;
+      if (t.op === "==" || t.op === "<" || t.op === ">" || t.op === "<=" || t.op === ">=") return 4;
+      if (t.op === "+" || t.op === "-" || t.op === "++") return 5;
+      return 6; // * / %
     case "App":
-      return 5;
+      return 7;
     default:
-      return 6;
+      return 8;
   }
 }
 
@@ -45,7 +50,7 @@ function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfNam
       s = t.ctor;
       break;
     case "App":
-      s = `${r(t.fn, 5)} ${r(t.arg, 6)}`;
+      s = `${r(t.fn, 7)} ${r(t.arg, 8)}`;
       break;
     case "BinOp":
       s = `${r(t.left, p)} ${t.op} ${r(t.right, p + 1)}`;
@@ -60,6 +65,12 @@ function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfNam
       s = `match ${r(t.scrutinee, 0)} { ${arms} }`;
       break;
     }
+    case "Let":
+      s = `let ${t.name} = ${r(t.value, 0)} in ${r(t.body, 0)}`;
+      break;
+    case "Lam":
+      s = `fn (${t.param}: ${tyToString(t.paramTy)}) -> ${r(t.body, 0)}`;
+      break;
   }
   return p < ctx ? `(${s})` : s;
 }

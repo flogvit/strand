@@ -2,7 +2,20 @@ import type { Ty } from "./types.ts";
 
 export type Hash = string; // e.g. "#7f3a1b2c"
 
-export type BinOp = "+" | "-" | "*" | "==" | "<" | ">" | "++";
+export type BinOp =
+  | "+"
+  | "-"
+  | "*"
+  | "/"
+  | "%"
+  | "=="
+  | "<"
+  | ">"
+  | "<="
+  | ">="
+  | "&&"
+  | "||"
+  | "++";
 
 /** One arm of a `match`: a constructor name, the variables it binds to the
  *  constructor's fields, and the body to evaluate when it matches. */
@@ -26,7 +39,9 @@ export type CoreTerm =
   | { tag: "If"; cond: CoreTerm; then: CoreTerm; else: CoreTerm }
   | { tag: "Self" }
   | { tag: "Ctor"; type: string; ctor: string }
-  | { tag: "Match"; scrutinee: CoreTerm; arms: MatchArm[] };
+  | { tag: "Match"; scrutinee: CoreTerm; arms: MatchArm[] }
+  | { tag: "Let"; name: string; value: CoreTerm; body: CoreTerm }
+  | { tag: "Lam"; param: string; paramTy: Ty; body: CoreTerm };
 
 export interface Param {
   name: string;
@@ -77,6 +92,13 @@ export function depsOf(term: CoreTerm): Hash[] {
       case "Match":
         walk(t.scrutinee);
         t.arms.forEach((a) => walk(a.body));
+        break;
+      case "Let":
+        walk(t.value);
+        walk(t.body);
+        break;
+      case "Lam":
+        walk(t.body);
         break;
       default:
         break;

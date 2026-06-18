@@ -4,7 +4,7 @@ import type { BinOp } from "../core/term.ts";
 import { lex, type Token } from "./lexer.ts";
 import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceItem, SurfaceParam, SurfaceTerm } from "./ast.ts";
 
-const RESERVED = new Set(["def", "data", "if", "then", "else", "match"]);
+const RESERVED = new Set(["def", "data", "if", "then", "else", "match", "let", "in", "fn"]);
 
 const isUpper = (s: string): boolean => /^[A-Z]/.test(s);
 
@@ -24,6 +24,10 @@ class Parser {
   private isSym(s: string): boolean {
     const t = this.peek();
     return t.kind === "sym" && t.value === s;
+  }
+  private isAnySym(...ss: string[]): boolean {
+    const t = this.peek();
+    return t.kind === "sym" && ss.includes(t.value);
   }
   private isKw(s: string): boolean {
     const t = this.peek();
@@ -63,8 +67,7 @@ class Parser {
     this.eatSym("->");
     const ret = this.parseType();
     this.eatSym("=");
-    const body = this.parseExpr();
-    return { kind: "def", name, params, ret, body };
+    return { kind: "def", name, params, ret, body: this.parseExpr() };
   }
 
   private parseParam(): SurfaceParam {
@@ -143,7 +146,8 @@ class Parser {
     throw new StrandSyntaxError(`expected a type, got '${t.value || t.kind}'`, t.pos);
   }
 
-  // --- expressions (if/match > cmp > +/-/++ > * > application > atom) ---
+  // --- expressions ---
+  // precedence: if/match/let/fn > || > && > cmp > +/-/++ > * / % > application > atom
 
   parseExpr(): SurfaceTerm {
     if (this.isKw("if")) {
@@ -152,11 +156,34 @@ class Parser {
       this.eatKw("then");
       const then = this.parseExpr();
       this.eatKw("else");
-      const els = this.parseExpr();
-      return { tag: "If", cond, then, else: els };
+      return { tag: "If", cond, then, else: this.parseExpr() };
     }
     if (this.isKw("match")) return this.parseMatch();
-    return this.parseCmp();
+    if (this.isKw("let")) return this.parseLet();
+    if (this.isKw("fn")) return this.parseLam();
+    return this.parseOr();
+  }
+
+  private parseLet(): SurfaceTerm {
+    this.eatKw("let");
+    const name = this.eatIdent();
+    this.eatSym("=");
+    const value = this.parseExpr();
+    this.eatKw("in");
+    return { tag: "Let", name, value, body: this.parseExpr() };
+  }
+
+  private parseLam(): SurfaceTerm {
+    this.eatKw("fn");
+    const params: SurfaceParam[] = [];
+    while (this.isSym("(")) params.push(this.parseParam());
+    if (params.length === 0) throw new StrandSyntaxError("fn needs at least one parameter", this.peek().pos);
+    this.eatSym("->");
+    let body = this.parseExpr();
+    for (let i = params.length - 1; i >= 0; i--) {
+      body = { tag: "Lam", param: params[i].name, paramTy: params[i].ty, body };
+    }
+    return body;
   }
 
   private parseMatch(): SurfaceTerm {
@@ -180,9 +207,27 @@ class Parser {
     return { ctor, vars, body: this.parseExpr() };
   }
 
+  private parseOr(): SurfaceTerm {
+    let left = this.parseAnd();
+    while (this.isSym("||")) {
+      this.next();
+      left = { tag: "BinOp", op: "||", left, right: this.parseAnd() };
+    }
+    return left;
+  }
+
+  private parseAnd(): SurfaceTerm {
+    let left = this.parseCmp();
+    while (this.isSym("&&")) {
+      this.next();
+      left = { tag: "BinOp", op: "&&", left, right: this.parseCmp() };
+    }
+    return left;
+  }
+
   private parseCmp(): SurfaceTerm {
     const left = this.parseAdd();
-    if (this.isSym("==") || this.isSym("<") || this.isSym(">")) {
+    if (this.isAnySym("==", "<", ">", "<=", ">=")) {
       const op = this.next().value as BinOp;
       return { tag: "BinOp", op, left, right: this.parseAdd() };
     }
@@ -191,7 +236,7 @@ class Parser {
 
   private parseAdd(): SurfaceTerm {
     let left = this.parseMul();
-    while (this.isSym("+") || this.isSym("-") || this.isSym("++")) {
+    while (this.isAnySym("+", "-", "++")) {
       const op = this.next().value as BinOp;
       left = { tag: "BinOp", op, left, right: this.parseMul() };
     }
@@ -200,7 +245,7 @@ class Parser {
 
   private parseMul(): SurfaceTerm {
     let left = this.parseApp();
-    while (this.isSym("*")) {
+    while (this.isAnySym("*", "/", "%")) {
       const op = this.next().value as BinOp;
       left = { tag: "BinOp", op, left, right: this.parseApp() };
     }
