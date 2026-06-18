@@ -55,6 +55,10 @@ function resolveArm(
   registry: Registry,
   self: string | undefined,
 ): MatchArm {
+  if (arm.ctor === "_") {
+    if (arm.vars.length > 0) throw new StrandResolveError("wildcard pattern '_' takes no variables");
+    return { ctor: "_", vars: [], body: resolveTerm(arm.body, params, names, registry, self) };
+  }
   const c = registry.ctors.get(arm.ctor);
   if (!c) throw new StrandResolveError(`unknown constructor '${arm.ctor}'`);
   if (arm.vars.length !== c.ctor.fields.length) {

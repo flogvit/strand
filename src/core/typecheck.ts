@@ -90,6 +90,10 @@ export function infer(
       const scrutTy = rec(t.scrutinee, env);
       const result = freshFlex();
       for (const arm of t.arms) {
+        if (arm.ctor === "_") {
+          u.unify(result, rec(arm.body, env));
+          continue;
+        }
         const c = registry.ctors.get(arm.ctor);
         if (!c) throw new StrandTypeError(`unknown constructor '${arm.ctor}'`);
         const inst = new Map(c.decl.params.map((p) => [p, freshFlex()] as const));
@@ -99,6 +103,16 @@ export function infer(
         const env2 = new Map(env);
         arm.vars.forEach((v, i) => env2.set(v, fieldTys[i]));
         u.unify(result, rec(arm.body, env2));
+      }
+      // exhaustiveness: every constructor of the scrutinee's type must be covered, or a wildcard present
+      if (!t.arms.some((a) => a.ctor === "_")) {
+        const lead = t.arms.find((a) => a.ctor !== "_");
+        const c = lead ? registry.ctors.get(lead.ctor) : undefined;
+        if (c) {
+          const covered = new Set(t.arms.map((a) => a.ctor));
+          const missing = c.decl.ctors.filter((x) => !covered.has(x.name)).map((x) => x.name);
+          if (missing.length > 0) throw new StrandTypeError(`non-exhaustive match: missing ${missing.join(", ")}`);
+        }
       }
       return result;
     }

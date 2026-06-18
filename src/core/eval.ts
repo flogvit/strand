@@ -142,7 +142,7 @@ export function evalTerm(
     case "Match": {
       const s = rec(t.scrutinee, env);
       if (s.tag !== "Data") throw new StrandEvalError("match on a non-data value");
-      const arm = t.arms.find((a) => a.ctor === s.ctor);
+      const arm = t.arms.find((a) => a.ctor === s.ctor) ?? t.arms.find((a) => a.ctor === "_");
       if (!arm) throw new StrandEvalError(`no match arm for constructor '${s.ctor}'`);
       const env2 = new Map(env);
       arm.vars.forEach((v, i) => env2.set(v, s.fields[i]));

@@ -66,6 +66,7 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string): str
       const s = `$s${matchCounter++}`;
       const arms = t.arms
         .map((arm) => {
+          if (arm.ctor === "_") return `return ${e(arm.body)};`;
           const binds = arm.vars.map((v, i) => `const ${v} = ${s}.f${i};`).join(" ");
           return `if (${s}.tag === ${JSON.stringify(arm.ctor)}) { ${binds} return ${e(arm.body)}; }`;
         })
