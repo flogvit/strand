@@ -6,7 +6,7 @@ export interface Token {
   pos: number;
 }
 
-const TWO_CHAR = new Set(["->", "==", "++", "<=", ">=", "&&", "||"]);
+const TWO_CHAR = new Set(["->", "==", "++", "<=", ">=", "&&", "||", "::"]);
 const ONE_CHAR = new Set(["(", ")", ":", "=", "+", "-", "*", "/", "%", "<", ">", "{", "}", "|", ".", ","]);
 
 /** Turn Strand source into a token stream. Supports `#` line comments. */

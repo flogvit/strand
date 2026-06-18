@@ -136,6 +136,10 @@ mutually-recursive groups still need annotations.
 `Int` is a 64-bit-safe integer (a JavaScript double, exact to 2^53−1);
 arbitrary-precision integers are out of scope.
 
-Deliberately out of scope for now: modules beyond the flat namespace, a general
-effect system (IO is the one effect), and content-addressed *types* (types are
-referenced by name; values are by content hash).
+`module Foo` qualifies value names to `Foo::name`, referenced across modules as
+`Foo::name` (types stay global; same-module references in a later submission
+must qualify).
+
+Deliberately out of scope for now: a general effect system (IO is the one
+effect), content-addressed *types* (types are referenced by name; values are by
+content hash), and a full LSP server (formatter and `check` exist).

@@ -107,7 +107,11 @@ export function compileProgram(
   baseNames: Map<string, Hash>,
   baseData: DataDecl[] = [],
 ): Bind[] {
-  const items = parseProgram(src);
+  const parsed = parseProgram(src);
+  const first = parsed[0];
+  const prefix = first && first.kind === "module" ? first.name : "";
+  const items = prefix ? parsed.slice(1) : parsed;
+  const qual = (n: string): string => (prefix ? `${prefix}::${n}` : n);
   const names = new Map(baseNames);
   const decls = [...baseData];
   const binds: Bind[] = [];
@@ -129,7 +133,7 @@ export function compileProgram(
       const ty = typecheckDef(cdef, store, registry);
       const hash = store.put(cdef, ty);
       names.set(item.name, hash);
-      binds.push({ name: item.name, hash, kind: "def" });
+      binds.push({ name: qual(item.name), hash, kind: "def" });
     }
   }
 
@@ -159,7 +163,7 @@ export function compileProgram(
     const ty = typecheckDef(cdef, store, registry);
     const hash = store.put(cdef, ty);
     names.set(name, hash);
-    binds.push({ name, hash, kind: "def" });
+    binds.push({ name: qual(name), hash, kind: "def" });
   }
 
   function bindGroup(members: string[]): void {
@@ -174,7 +178,7 @@ export function compileProgram(
     });
     members.forEach((n, i) => {
       names.set(n, hashes[i]);
-      binds.push({ name: n, hash: hashes[i], kind: "def" });
+      binds.push({ name: qual(n), hash: hashes[i], kind: "def" });
     });
   }
 }

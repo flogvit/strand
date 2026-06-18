@@ -8,12 +8,13 @@ import type {
   SurfaceDef,
   SurfaceForeign,
   SurfaceItem,
+  SurfaceModule,
   SurfaceParam,
   SurfaceRecord,
   SurfaceTerm,
 } from "./ast.ts";
 
-const RESERVED = new Set(["def", "data", "record", "foreign", "if", "then", "else", "match", "let", "in", "fn"]);
+const RESERVED = new Set(["def", "data", "record", "foreign", "module", "if", "then", "else", "match", "let", "in", "fn"]);
 
 const isUpper = (s: string): boolean => /^[A-Z]/.test(s);
 
@@ -68,9 +69,15 @@ class Parser {
       if (this.isKw("data")) items.push(this.parseData());
       else if (this.isKw("record")) items.push(this.parseRecord());
       else if (this.isKw("foreign")) items.push(this.parseForeign());
+      else if (this.isKw("module")) items.push(this.parseModule());
       else items.push(this.parseDef());
     }
     return items;
+  }
+
+  private parseModule(): SurfaceModule {
+    this.eatKw("module");
+    return { kind: "module", name: this.eatIdent() };
   }
 
   private parseRecord(): SurfaceRecord {
@@ -351,7 +358,12 @@ class Parser {
       this.next();
       if (t.value === "true") return { tag: "BoolLit", value: true };
       if (t.value === "false") return { tag: "BoolLit", value: false };
-      return { tag: "Name", name: t.value };
+      let name = t.value;
+      if (this.isSym("::")) {
+        this.next();
+        name = `${name}::${this.eatIdent()}`; // module-qualified reference
+      }
+      return { tag: "Name", name };
     }
     if (t.kind === "sym" && t.value === "(") {
       this.next();

@@ -59,4 +59,10 @@ export interface SurfaceRecord {
   fields: { name: string; ty: Ty }[];
 }
 
-export type SurfaceItem = SurfaceDef | SurfaceDataDecl | SurfaceForeign | SurfaceRecord;
+/** A module header: qualifies the value names that follow with `Name::`. */
+export interface SurfaceModule {
+  kind: "module";
+  name: string;
+}
+
+export type SurfaceItem = SurfaceDef | SurfaceDataDecl | SurfaceForeign | SurfaceRecord | SurfaceModule;
