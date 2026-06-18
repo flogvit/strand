@@ -3,6 +3,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { StrandError } from "./errors.ts";
 import { compileProgram, dataDeclsOf, evalQuery, registryOf, valueNamesOf } from "./pipeline.ts";
+import { parseProgram } from "./syntax/parser.ts";
+import { printProgram } from "./syntax/print.ts";
 import { merge, resolveConflict } from "./merge.ts";
 import { typecheckNamespace } from "./core/check.ts";
 import { namesOf, projectNamespace, renderDef } from "./project.ts";
@@ -44,6 +46,7 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand ls
   strand show <name>
   strand eval "<expr>"
+  strand fmt <file.strand> [--write]   # pretty-print Strand source
   strand run <name>            # transpile to TS and execute
   strand emit [--out <file>]   # transpile namespace to TypeScript
   strand pending
@@ -129,6 +132,19 @@ function main(argv: string[]): number {
       const b = repo.namespace.get(name);
       if (!b) throw new StrandError(`no such name '${name}'`);
       console.log(renderDef(name, b.hash, repo.store, namesOf(repo.namespace)));
+      return 0;
+    }
+
+    case "fmt": {
+      const file = positionals[1];
+      if (!file) throw new StrandError("fmt needs a <file.strand>");
+      const formatted = printProgram(parseProgram(readFileSync(file, "utf8")));
+      if (opts.write) {
+        writeFileSync(file, formatted);
+        console.log(`formatted ${file}`);
+      } else {
+        process.stdout.write(formatted);
+      }
       return 0;
     }
 
