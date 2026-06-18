@@ -47,6 +47,8 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string, grou
       return selfName;
     case "Cyc":
       return groupNames[t.index];
+    case "Foreign":
+      return `(${t.code})`;
     case "Var":
       return t.name;
     case "Ref":

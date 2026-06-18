@@ -2,9 +2,9 @@ import { StrandSyntaxError } from "../errors.ts";
 import { tBool, tCon, tInt, tText, tFun, tVar, type Ty } from "../core/types.ts";
 import type { BinOp } from "../core/term.ts";
 import { lex, type Token } from "./lexer.ts";
-import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceItem, SurfaceParam, SurfaceTerm } from "./ast.ts";
+import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceForeign, SurfaceItem, SurfaceParam, SurfaceTerm } from "./ast.ts";
 
-const RESERVED = new Set(["def", "data", "if", "then", "else", "match", "let", "in", "fn"]);
+const RESERVED = new Set(["def", "data", "foreign", "if", "then", "else", "match", "let", "in", "fn"]);
 
 const isUpper = (s: string): boolean => /^[A-Z]/.test(s);
 
@@ -55,8 +55,25 @@ class Parser {
 
   parseProgram(): SurfaceItem[] {
     const items: SurfaceItem[] = [];
-    while (!this.atEof()) items.push(this.isKw("data") ? this.parseData() : this.parseDef());
+    while (!this.atEof()) {
+      if (this.isKw("data")) items.push(this.parseData());
+      else if (this.isKw("foreign")) items.push(this.parseForeign());
+      else items.push(this.parseDef());
+    }
     return items;
+  }
+
+  private parseForeign(): SurfaceForeign {
+    this.eatKw("foreign");
+    const name = this.eatIdent();
+    const params: SurfaceParam[] = [];
+    while (this.isSym("(")) params.push(this.parseParam());
+    this.eatSym("->");
+    const ret = this.parseType();
+    this.eatSym("=");
+    const t = this.next();
+    if (t.kind !== "text") throw new StrandSyntaxError("foreign body must be a string of TypeScript", t.pos);
+    return { kind: "foreign", name, params, ret, code: t.value };
   }
 
   private parseDef(): SurfaceDef {

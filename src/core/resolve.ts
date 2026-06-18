@@ -1,5 +1,5 @@
 import { StrandResolveError } from "../errors.ts";
-import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceTerm } from "../syntax/ast.ts";
+import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceForeign, SurfaceTerm } from "../syntax/ast.ts";
 import type { Registry } from "./registry.ts";
 import type { CoreDef, CoreTerm, DataDecl, Hash, MatchArm } from "./term.ts";
 
@@ -100,4 +100,13 @@ export function resolveGroupMember(
 /** A `data` declaration resolves directly — its field types are already types. */
 export function resolveData(d: SurfaceDataDecl): DataDecl {
   return { name: d.name, params: d.params, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields })) };
+}
+
+/** A `foreign` declaration becomes a definition whose body is opaque TS code. */
+export function resolveForeign(d: SurfaceForeign): CoreDef {
+  return {
+    params: d.params.map((p) => ({ name: p.name, ty: p.ty })),
+    ret: d.ret,
+    body: { tag: "Foreign", code: d.code },
+  };
 }

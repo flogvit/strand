@@ -42,7 +42,8 @@ export type CoreTerm =
   | { tag: "Ctor"; type: string; ctor: string }
   | { tag: "Match"; scrutinee: CoreTerm; arms: MatchArm[] }
   | { tag: "Let"; name: string; value: CoreTerm; body: CoreTerm }
-  | { tag: "Lam"; param: string; paramTy: Ty; body: CoreTerm };
+  | { tag: "Lam"; param: string; paramTy: Ty; body: CoreTerm }
+  | { tag: "Foreign"; code: string }; // a trusted raw TypeScript expression (body of a foreign def)
 
 export interface Param {
   name: string;

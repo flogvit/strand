@@ -98,6 +98,9 @@ def greet (name: Text) -> Text = "Hello, " ++ name
   (self and mutual), `if/then/else`, `let … in …`, lambdas
   (`fn (x: T) -> …`, closures included), arithmetic `+ - * / %` and text `++`,
   comparison `== < > <= >=`, boolean `&& ||`, juxtaposition application.
+- Foreign TypeScript via `foreign name (p: T) -> R = "<ts expr>"` — a trusted
+  binding the checker takes on faith and the backend emits verbatim (e.g.
+  `foreign sqrtFloor (n: Int) -> Int = "Math.floor(Math.sqrt(n))"`).
 - A prelude (`lib/prelude.strand`) — `List`, `Option`, `map`, `filter`, `foldr`,
   `length`, `append`, `range`, `sum` — written in Strand itself.
 - Real examples in `examples/` — quicksort + an expression evaluator

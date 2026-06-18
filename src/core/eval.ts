@@ -77,6 +77,24 @@ function computeBinOp(op: BinOp, l: Value, r: Value): Value {
   throw new StrandEvalError(`bad operator ${op}`);
 }
 
+function toJs(v: Value): unknown {
+  if (v.tag === "Int" || v.tag === "Bool" || v.tag === "Text") return v.value;
+  throw new StrandEvalError("cannot pass a non-scalar value to foreign code");
+}
+
+function fromJs(x: unknown): Value {
+  if (typeof x === "number") return { tag: "Int", value: x };
+  if (typeof x === "boolean") return { tag: "Bool", value: x };
+  if (typeof x === "string") return { tag: "Text", value: x };
+  throw new StrandEvalError("foreign code returned a non-scalar value");
+}
+
+function callForeign(def: CoreDef, args: Value[]): Value {
+  const code = (def.body as { tag: "Foreign"; code: string }).code;
+  const fn = new Function(...def.params.map((p) => p.name), `return (${code});`);
+  return fromJs(fn(...args.map(toJs)));
+}
+
 function apply(fn: Value, arg: Value, store: Store, registry: Registry): Value {
   if (fn.tag === "Ctor") {
     const args = [...fn.args, arg];
@@ -91,6 +109,7 @@ function apply(fn: Value, arg: Value, store: Store, registry: Registry): Value {
   if (fn.tag !== "Closure") throw new StrandEvalError("applied a non-function value");
   const applied = [...fn.applied, arg];
   if (applied.length < fn.def.params.length) return { tag: "Closure", def: fn.def, applied };
+  if (fn.def.body.tag === "Foreign") return callForeign(fn.def, applied);
   const env = new Map<string, Value>();
   fn.def.params.forEach((p, i) => env.set(p.name, applied[i]));
   return evalTerm(fn.def.body, env, store, registry, fn.def);
@@ -163,5 +182,7 @@ export function evalTerm(
     }
     case "Lam":
       return { tag: "Lam", param: t.param, body: t.body, env: new Map(env), selfDef };
+    case "Foreign":
+      return fromJs(new Function(`return (${t.code});`)());
   }
 }

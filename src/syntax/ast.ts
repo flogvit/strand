@@ -42,4 +42,13 @@ export interface SurfaceDataDecl {
   ctors: { name: string; fields: Ty[] }[];
 }
 
-export type SurfaceItem = SurfaceDef | SurfaceDataDecl;
+/** A foreign declaration: a trusted binding to a raw TypeScript expression. */
+export interface SurfaceForeign {
+  kind: "foreign";
+  name: string;
+  params: SurfaceParam[];
+  ret: Ty;
+  code: string;
+}
+
+export type SurfaceItem = SurfaceDef | SurfaceDataDecl | SurfaceForeign;

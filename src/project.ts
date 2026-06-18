@@ -43,6 +43,9 @@ function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfNam
     case "Cyc":
       s = groupNames[t.index] ?? `cyc${t.index}`;
       break;
+    case "Foreign":
+      s = JSON.stringify(t.code);
+      break;
     case "Var":
       s = t.name;
       break;
@@ -98,7 +101,12 @@ export function renderDef(name: string, hash: Hash, store: Store, nameOf: Map<Ha
   if (data) return renderData(data);
   const def = store.defOf(hash);
   if (!def) return `def ${name} = <missing ${hash}>`;
-  const params = def.params.map((p) => `(${p.name}: ${tyToString(p.ty)})`).join(" ");
+  const paramList = def.params.map((p) => `(${p.name}: ${tyToString(p.ty)})`).join(" ");
+  if (def.body.tag === "Foreign") {
+    const kw = paramList ? `foreign ${name} ${paramList}` : `foreign ${name}`;
+    return `${kw} -> ${tyToString(def.ret)} = ${JSON.stringify(def.body.code)}`;
+  }
+  const params = paramList;
   const head = params ? `def ${name} ${params}` : `def ${name}`;
   const groupNames = def.group ? def.group.map((h) => nameOf.get(h) ?? h) : [];
   return `${head} -> ${tyToString(def.ret)} = ${renderTerm(def.body, nameOf, 0, name, groupNames)}`;

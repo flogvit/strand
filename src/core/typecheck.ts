@@ -35,6 +35,8 @@ export function infer(
     case "Cyc":
       if (!groupTys) throw new StrandTypeError("mutual recursion is not allowed here");
       return groupTys[t.index];
+    case "Foreign":
+      throw new StrandTypeError("a foreign body cannot appear in expression position");
     case "Var": {
       const ty = env.get(t.name);
       if (!ty) throw new StrandTypeError(`unbound variable '${t.name}'`);
@@ -136,6 +138,8 @@ export function infer(
 
 /** Typecheck a value definition and return its declared (curried) type. */
 export function typecheckDef(def: CoreDef, store: Store, registry: Registry): Ty {
+  // a foreign body is trusted: its declared signature is taken on faith
+  if (def.body.tag === "Foreign") return tyOfSignature(def.params.map((p) => p.ty), def.ret);
   const u = new Unifier();
   const selfTy = tyOfSignature(def.params.map((p) => p.ty), def.ret);
   const env = new Map<string, Ty>();

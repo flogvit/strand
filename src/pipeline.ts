@@ -1,6 +1,6 @@
 import { parseExpr, parseProgram } from "./syntax/parser.ts";
 import type { SurfaceDef, SurfaceTerm } from "./syntax/ast.ts";
-import { resolveData, resolveDef, resolveGroupMember, resolveTerm } from "./core/resolve.ts";
+import { resolveData, resolveDef, resolveForeign, resolveGroupMember, resolveTerm } from "./core/resolve.ts";
 import { infer, typecheckDef, typecheckGroup } from "./core/typecheck.ts";
 import { evalTerm, type Value } from "./core/eval.ts";
 import { Store } from "./core/store.ts";
@@ -118,6 +118,17 @@ export function compileProgram(
     }
   }
   const registry = buildRegistry(decls);
+
+  // foreign declarations: trusted bindings, available to the value defs that follow
+  for (const item of items) {
+    if (item.kind === "foreign") {
+      const cdef = resolveForeign(item);
+      const ty = typecheckDef(cdef, store, registry);
+      const hash = store.put(cdef, ty);
+      names.set(item.name, hash);
+      binds.push({ name: item.name, hash, kind: "def" });
+    }
+  }
 
   const defItems = items.filter((i): i is SurfaceDef => i.kind === "def");
   const byName = new Map(defItems.map((d) => [d.name, d]));
