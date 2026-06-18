@@ -140,6 +140,10 @@ arbitrary-precision integers are out of scope.
 `Foo::name` (types stay global; same-module references in a later submission
 must qualify).
 
+Tooling: a formatter (`strand fmt`), a type-checker (`strand check`), and a
+Language Server (`npm run lsp`) giving diagnostics and formatting in any LSP
+editor. Richer LSP features (hover, go-to-definition) are future.
+
 Deliberately out of scope for now: a general effect system (IO is the one
-effect), content-addressed *types* (types are referenced by name; values are by
-content hash), and a full LSP server (formatter and `check` exist).
+effect) and content-addressed *types* (types are referenced by name; values are
+by content hash).
