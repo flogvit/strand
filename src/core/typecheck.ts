@@ -162,7 +162,49 @@ export function typecheckDef(def: CoreDef, store: Store, registry: Registry): Ty
   for (const p of def.params) env.set(p.name, p.ty);
   const bodyTy = infer(def.body, env, store, registry, u, selfTy);
   u.unify(bodyTy, def.ret);
-  return selfTy;
+
+  // Generalize the (possibly inferred) signature: solve the unification variables,
+  // then quantify the leftover ones into fresh rigid type variables, writing the
+  // resolved types back into the definition. Fully-annotated defs are unchanged.
+  const zonkedParams = def.params.map((p) => u.zonk(p.ty));
+  const zonkedRet = u.zonk(def.ret);
+  const order: number[] = [];
+  const collect = (t: Ty): void => {
+    switch (t.tag) {
+      case "Flex":
+        if (!order.includes(t.id)) order.push(t.id);
+        break;
+      case "Fun":
+        collect(t.from);
+        collect(t.to);
+        break;
+      case "Con":
+        t.args.forEach(collect);
+        break;
+      default:
+        break;
+    }
+  };
+  zonkedParams.forEach(collect);
+  collect(zonkedRet);
+  const m = new Map(order.map((id, i) => [id, tVar(`t${i}`)] as const));
+  const subst = (t: Ty): Ty => {
+    switch (t.tag) {
+      case "Flex":
+        return m.get(t.id) ?? t;
+      case "Fun":
+        return tFun(subst(t.from), subst(t.to));
+      case "Con":
+        return tCon(t.name, t.args.map(subst));
+      default:
+        return t;
+    }
+  };
+  def.params.forEach((p, i) => {
+    p.ty = subst(zonkedParams[i]);
+  });
+  def.ret = subst(zonkedRet);
+  return tyOfSignature(def.params.map((p) => p.ty), def.ret);
 }
 
 /** Typecheck a mutually-recursive group: each member's body is checked with all

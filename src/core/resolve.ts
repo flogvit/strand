@@ -1,6 +1,7 @@
 import { StrandResolveError } from "../errors.ts";
 import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceForeign, SurfaceRecord, SurfaceTerm } from "../syntax/ast.ts";
 import { PRIMS } from "./prims.ts";
+import { freshFlex } from "./unify.ts";
 import type { Registry } from "./registry.ts";
 import type { CoreDef, CoreTerm, DataDecl, Hash, MatchArm } from "./term.ts";
 
@@ -75,12 +76,14 @@ function resolveArm(
   return { ctor: arm.ctor, vars: arm.vars, body: resolveTerm(arm.body, inner, names, registry, self, group) };
 }
 
-/** Resolve a single value definition. Its own name is in scope as `Self`. */
+/** Resolve a single value definition. Its own name is in scope as `Self`.
+ *  Omitted parameter/return types become fresh unification variables, which the
+ *  type checker solves and generalizes. */
 export function resolveDef(d: SurfaceDef, names: Map<string, Hash>, registry: Registry): CoreDef {
   const params = new Set(d.params.map((p) => p.name));
   return {
-    params: d.params.map((p) => ({ name: p.name, ty: p.ty })),
-    ret: d.ret,
+    params: d.params.map((p) => ({ name: p.name, ty: p.ty ?? freshFlex() })),
+    ret: d.ret ?? freshFlex(),
     body: resolveTerm(d.body, params, names, registry, d.name),
   };
 }
@@ -93,9 +96,14 @@ export function resolveGroupMember(
   registry: Registry,
   group: Map<string, number>,
 ): CoreDef {
+  // mutual recursion does not support inference: members must be fully annotated
+  for (const p of d.params) {
+    if (!p.ty) throw new StrandResolveError(`mutually-recursive '${d.name}' needs an explicit type for parameter '${p.name}'`);
+  }
+  if (!d.ret) throw new StrandResolveError(`mutually-recursive '${d.name}' needs an explicit return type`);
   const params = new Set(d.params.map((p) => p.name));
   return {
-    params: d.params.map((p) => ({ name: p.name, ty: p.ty })),
+    params: d.params.map((p) => ({ name: p.name, ty: p.ty! })),
     ret: d.ret,
     body: resolveTerm(d.body, params, names, registry, undefined, group),
   };

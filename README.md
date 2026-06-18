@@ -129,10 +129,13 @@ A working language, not (yet) a production one. The conflict-free substrate
 covers every definition — values *and* types — and whole-namespace type-checking
 runs at merge, so a type rebind that would turn a green definition red is caught.
 
+Type signatures are optional: omitted parameter and return types are inferred
+(with generalization, so `def id x = x` is polymorphic). Lambdas and
+mutually-recursive groups still need annotations.
+
 `Int` is a 64-bit-safe integer (a JavaScript double, exact to 2^53−1);
 arbitrary-precision integers are out of scope.
 
-Deliberately out of scope for now: side-effecting I/O (programs compute values;
-`eval`/`run` print them), type inference (signatures are explicit), and modules
-beyond the flat namespace. Value references are by content hash (identity); type
-references are by name.
+Deliberately out of scope for now: modules beyond the flat namespace, a general
+effect system (IO is the one effect), and content-addressed *types* (types are
+referenced by name; values are by content hash).

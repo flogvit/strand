@@ -109,9 +109,15 @@ class Parser {
     this.eatKw("def");
     const name = this.eatIdent();
     const params: SurfaceParam[] = [];
-    while (this.isSym("(")) params.push(this.parseParam());
-    this.eatSym("->");
-    const ret = this.parseType();
+    // a parameter is either `(name: Type)` (annotated) or a bare `name` (inferred)
+    while (this.isSym("(") || (this.peek().kind === "ident" && !RESERVED.has(this.peek().value))) {
+      params.push(this.isSym("(") ? this.parseParam() : { name: this.eatIdent() });
+    }
+    let ret: Ty | undefined;
+    if (this.isSym("->")) {
+      this.next();
+      ret = this.parseType();
+    }
     this.eatSym("=");
     return { kind: "def", name, params, ret, body: this.parseExpr() };
   }

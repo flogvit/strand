@@ -25,14 +25,14 @@ export interface SurfaceArm {
 
 export interface SurfaceParam {
   name: string;
-  ty: Ty;
+  ty?: Ty; // optional — inferred when omitted
 }
 
 export interface SurfaceDef {
   kind: "def";
   name: string;
   params: SurfaceParam[];
-  ret: Ty;
+  ret?: Ty; // optional — inferred when omitted
   body: SurfaceTerm;
 }
 
