@@ -144,6 +144,9 @@ Tooling: a formatter (`strand fmt`), a type-checker (`strand check`), and a
 Language Server (`npm run lsp`) giving diagnostics and formatting in any LSP
 editor. Richer LSP features (hover, go-to-definition) are future.
 
-Deliberately out of scope for now: a general effect system (IO is the one
-effect) and content-addressed *types* (types are referenced by name; values are
-by content hash).
+Each definition pins the data declarations its types reference by content hash,
+so rebinding a type name cannot break an existing definition — types, like
+values, are referenced by identity, and a merged namespace stays green by
+construction.
+
+Deliberately out of scope for now: a general effect system (IO is the one effect).

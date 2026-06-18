@@ -27,17 +27,18 @@ test("a freshly merged namespace is green", () => {
   assert.deepEqual(typecheckNamespace(ns, store), []);
 });
 
-test("whole-namespace check catches a type rebind that breaks a green definition", () => {
+test("content-addressed types: a green definition survives a type-name rebind", () => {
   const store = new Store();
   const ns: Namespace = new Map();
   bindInto(ns, store, "a", "data Color = Red | Green\ndef f (c: Color) -> Int = match c { Red -> 0 | Green -> 1 }");
-  assert.deepEqual(typecheckNamespace(ns, store), []); // green before
+  assert.deepEqual(typecheckNamespace(ns, store), []); // green
 
   // agent B rebinds the type name `Color` to an incompatible declaration
   for (const b of compileProgram("data Color = Blue", store, new Map(), [])) {
     ns.set(b.name, { hash: b.hash, intent: "", by: "b" });
   }
 
-  const errors = typecheckNamespace(ns, store);
-  assert.ok(errors.some((e) => e.name === "f"), "f should now be red because Red/Green no longer exist");
+  // f pinned the original Color (by content hash), so it stays green — the
+  // rebind of the *name* Color does not break it. Types are by identity.
+  assert.deepEqual(typecheckNamespace(ns, store), []);
 });

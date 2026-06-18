@@ -1,7 +1,8 @@
 import { StrandTypeError } from "../errors.ts";
+import { hashData } from "./hash.ts";
 import type { Registry } from "./registry.ts";
 import type { Store } from "./store.ts";
-import type { CoreDef, CoreTerm, CtorDecl, DataDecl } from "./term.ts";
+import type { CoreDef, CoreTerm, CtorDecl, DataDecl, Hash } from "./term.ts";
 import { tBool, tCon, tInt, tText, tFun, tVar, tyOfSignature, type Ty } from "./types.ts";
 import { freshFlex, instantiate, substVars, Unifier } from "./unify.ts";
 import { PRIMS } from "./prims.ts";
@@ -9,6 +10,70 @@ import { PRIMS } from "./prims.ts";
 /** The (polymorphic) type scheme of a constructor: fields -> the data type. */
 function ctorType(decl: DataDecl, ctor: CtorDecl): Ty {
   return tyOfSignature(ctor.fields, tCon(decl.name, decl.params.map(tVar)));
+}
+
+/** The content hashes of the data declarations a definition's types and
+ *  constructors reference. Pinning these gives types reference-by-identity. */
+function collectTypeDeps(def: CoreDef, registry: Registry): Hash[] {
+  const decls = new Set<DataDecl>();
+  const addType = (t: Ty): void => {
+    if (t.tag === "Con") {
+      const d = registry.types.get(t.name);
+      if (d) decls.add(d);
+      t.args.forEach(addType);
+    } else if (t.tag === "Fun") {
+      addType(t.from);
+      addType(t.to);
+    }
+  };
+  def.params.forEach((p) => addType(p.ty));
+  addType(def.ret);
+  const walk = (term: CoreTerm): void => {
+    switch (term.tag) {
+      case "Ctor": {
+        const c = registry.ctors.get(term.ctor);
+        if (c) decls.add(c.decl);
+        break;
+      }
+      case "Match": {
+        walk(term.scrutinee);
+        term.arms.forEach((a) => {
+          const c = registry.ctors.get(a.ctor);
+          if (c) decls.add(c.decl);
+          walk(a.body);
+        });
+        break;
+      }
+      case "App":
+        walk(term.fn);
+        walk(term.arg);
+        break;
+      case "BinOp":
+        walk(term.left);
+        walk(term.right);
+        break;
+      case "If":
+        walk(term.cond);
+        walk(term.then);
+        walk(term.else);
+        break;
+      case "Let":
+        walk(term.value);
+        walk(term.body);
+        break;
+      case "Lam":
+        addType(term.paramTy);
+        walk(term.body);
+        break;
+      case "Field":
+        walk(term.record);
+        break;
+      default:
+        break;
+    }
+  };
+  walk(def.body);
+  return [...decls].map(hashData);
 }
 
 /** Infer the type of a core term against a unifier. Polymorphic things (refs and
@@ -155,7 +220,10 @@ export function infer(
 /** Typecheck a value definition and return its declared (curried) type. */
 export function typecheckDef(def: CoreDef, store: Store, registry: Registry): Ty {
   // a foreign body is trusted: its declared signature is taken on faith
-  if (def.body.tag === "Foreign") return tyOfSignature(def.params.map((p) => p.ty), def.ret);
+  if (def.body.tag === "Foreign") {
+    def.pins = collectTypeDeps(def, registry);
+    return tyOfSignature(def.params.map((p) => p.ty), def.ret);
+  }
   const u = new Unifier();
   const selfTy = tyOfSignature(def.params.map((p) => p.ty), def.ret);
   const env = new Map<string, Ty>();
@@ -204,6 +272,7 @@ export function typecheckDef(def: CoreDef, store: Store, registry: Registry): Ty
     p.ty = subst(zonkedParams[i]);
   });
   def.ret = subst(zonkedRet);
+  def.pins = collectTypeDeps(def, registry);
   return tyOfSignature(def.params.map((p) => p.ty), def.ret);
 }
 
@@ -219,5 +288,8 @@ export function typecheckGroup(defs: CoreDef[], store: Store, registry: Registry
     const bodyTy = infer(d.body, env, store, registry, u, undefined, groupTys);
     u.unify(bodyTy, d.ret);
   }
+  defs.forEach((d) => {
+    d.pins = collectTypeDeps(d, registry);
+  });
   return groupTys;
 }

@@ -60,6 +60,11 @@ export interface CoreDef {
    *  members (including this one), indexed as the body's `Cyc` nodes expect.
    *  Post-hoc metadata — not part of the content hash. */
   group?: Hash[];
+  /** The content hashes of the data declarations this definition's types and
+   *  constructors reference, pinned at compile time. Re-checking against these
+   *  (rather than against whatever a type name points at now) gives types
+   *  reference-by-identity. Post-hoc metadata — not part of the content hash. */
+  pins?: Hash[];
 }
 
 export interface CtorDecl {
