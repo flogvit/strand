@@ -47,6 +47,7 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand ls
   strand show <name>
   strand eval "<expr>"
+  strand check <file.strand>           # type-check a file, report errors
   strand fmt <file.strand> [--write]   # pretty-print Strand source
   strand test                  # run all zero-arg Bool definitions as tests
   strand untested              # definitions not reached by any test
@@ -149,6 +150,29 @@ function main(argv: string[]): number {
       if (!b) throw new StrandError(`no such name '${name}'`);
       console.log(renderDef(name, b.hash, repo.store, namesOf(repo.namespace)));
       return 0;
+    }
+
+    case "check": {
+      requireRepo(root);
+      const file = positionals[1];
+      if (!file) throw new StrandError("check needs a <file.strand>");
+      const repo = loadRepo(root);
+      try {
+        compileProgram(
+          readFileSync(file, "utf8"),
+          repo.store,
+          valueNamesOf(repo.namespace, repo.store),
+          dataDeclsOf(repo.namespace, repo.store),
+        );
+        console.log(`ok: ${file} type-checks against the namespace`);
+        return 0;
+      } catch (e) {
+        if (e instanceof StrandError) {
+          console.error(e.message);
+          return 1;
+        }
+        throw e;
+      }
     }
 
     case "fmt": {
