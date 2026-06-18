@@ -6,6 +6,8 @@ export interface Binding {
   hash: Hash;
   intent: string;
   by: string;
+  /** Checks this binding must have attested before it counts as fully green. */
+  requires?: string[];
 }
 
 /** name -> Binding. The whole "codebase" as seen at one point in time. */

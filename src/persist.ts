@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Store, type StoredDef } from "./core/store.ts";
+import { Store, type StoredItem } from "./core/store.ts";
 import type { Hash } from "./core/term.ts";
 import type { Binding, Conflict, Namespace, PendingTx } from "./model.ts";
 
@@ -11,6 +11,9 @@ export interface RepoState {
   namespace: Namespace;
   pending: PendingTx[];
   conflicts: Conflict[];
+  /** Checks attested for a content hash. Keyed on hash, so attestations never
+   *  go stale: change a definition and its hash (and required attestations) change. */
+  attestations: Record<Hash, string[]>;
 }
 
 function paths(root: string) {
@@ -21,6 +24,7 @@ function paths(root: string) {
     namespace: join(d, "namespace.json"),
     pending: join(d, "pending.json"),
     conflicts: join(d, "conflicts.json"),
+    attestations: join(d, "attestations.json"),
   };
 }
 
@@ -39,19 +43,20 @@ export function repoExists(root: string): boolean {
 
 export function initRepo(root: string): RepoState {
   mkdirSync(paths(root).dir, { recursive: true });
-  const state: RepoState = { store: new Store(), namespace: new Map(), pending: [], conflicts: [] };
+  const state: RepoState = { store: new Store(), namespace: new Map(), pending: [], conflicts: [], attestations: {} };
   saveRepo(root, state);
   return state;
 }
 
 export function loadRepo(root: string): RepoState {
   const p = paths(root);
-  const store = Store.fromJSON(readJSON<Record<Hash, StoredDef>>(p.store, {}));
+  const store = Store.fromJSON(readJSON<Record<Hash, StoredItem>>(p.store, {}));
   const nsObj = readJSON<Record<string, Binding>>(p.namespace, {});
   const namespace: Namespace = new Map(Object.entries(nsObj));
   const pending = readJSON<PendingTx[]>(p.pending, []);
   const conflicts = readJSON<Conflict[]>(p.conflicts, []);
-  return { store, namespace, pending, conflicts };
+  const attestations = readJSON<Record<Hash, string[]>>(p.attestations, {});
+  return { store, namespace, pending, conflicts, attestations };
 }
 
 export function saveRepo(root: string, state: RepoState): void {
@@ -60,4 +65,5 @@ export function saveRepo(root: string, state: RepoState): void {
   writeJSON(p.namespace, Object.fromEntries(state.namespace));
   writeJSON(p.pending, state.pending);
   writeJSON(p.conflicts, state.conflicts);
+  writeJSON(p.attestations, state.attestations);
 }

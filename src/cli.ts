@@ -50,6 +50,9 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand fmt <file.strand> [--write]   # pretty-print Strand source
   strand test                  # run all zero-arg Bool definitions as tests
   strand untested              # definitions not reached by any test
+  strand require <name> <check...>     # set required checks for a definition
+  strand attest <name> <check>         # record an attestation for its content hash
+  strand verify                        # check all required checks are attested
   strand run <name>            # transpile to TS and execute
   strand emit [--out <file>]   # transpile namespace to TypeScript
   strand pending
@@ -116,6 +119,13 @@ function main(argv: string[]): number {
         for (const r of red) console.log(`  ${r.name}: ${r.error}`);
       } else {
         console.log(`green-gate: green`);
+        // a green namespace type-checks, so attest `typecheck` for every binding's hash
+        for (const b of repo.namespace.values()) {
+          const list = repo.attestations[b.hash] ?? [];
+          if (!list.includes("typecheck")) list.push("typecheck");
+          repo.attestations[b.hash] = list;
+        }
+        saveRepo(root, repo);
       }
       return result.conflicts.length > 0 || red.length > 0 ? 2 : 0;
     }
@@ -224,7 +234,75 @@ function main(argv: string[]): number {
         ok ? pass++ : fail++;
       }
       console.log(`${pass} passed, ${fail} failed`);
+      if (fail === 0 && tests.length > 0) {
+        // all tests pass -> attest `tests` for the covered (dependency-closure) set
+        const reachable = new Set<string>();
+        const visit = (h: string): void => {
+          if (reachable.has(h)) return;
+          reachable.add(h);
+          const def = repo.store.defOf(h);
+          if (def) for (const d of depsOf(def.body)) visit(d);
+        };
+        for (const [, b] of tests) visit(b.hash);
+        for (const h of reachable) {
+          const list = repo.attestations[h] ?? [];
+          if (!list.includes("tests")) list.push("tests");
+          repo.attestations[h] = list;
+        }
+        saveRepo(root, repo);
+      }
       return fail > 0 ? 1 : 0;
+    }
+
+    case "attest": {
+      requireRepo(root);
+      const name = positionals[1];
+      const check = positionals[2];
+      if (!name || !check) throw new StrandError("attest needs <name> <check>");
+      const repo = loadRepo(root);
+      const b = repo.namespace.get(name);
+      if (!b) throw new StrandError(`no such name '${name}'`);
+      const list = repo.attestations[b.hash] ?? [];
+      if (!list.includes(check)) list.push(check);
+      repo.attestations[b.hash] = list;
+      saveRepo(root, repo);
+      console.log(`attested '${check}' for ${name} (${b.hash})`);
+      return 0;
+    }
+
+    case "require": {
+      requireRepo(root);
+      const name = positionals[1];
+      const checks = positionals.slice(2);
+      if (!name || checks.length === 0) throw new StrandError("require needs <name> <check...>");
+      const repo = loadRepo(root);
+      const b = repo.namespace.get(name);
+      if (!b) throw new StrandError(`no such name '${name}'`);
+      b.requires = checks;
+      repo.namespace.set(name, b);
+      saveRepo(root, repo);
+      console.log(`${name} now requires: ${checks.join(", ")}`);
+      return 0;
+    }
+
+    case "verify": {
+      requireRepo(root);
+      const repo = loadRepo(root);
+      let allGreen = true;
+      for (const [name, b] of [...repo.namespace].sort((a, z) => a[0].localeCompare(z[0]))) {
+        const req = b.requires ?? [];
+        if (req.length === 0) continue;
+        const attested = new Set(repo.attestations[b.hash] ?? []);
+        const missing = req.filter((c) => !attested.has(c));
+        if (missing.length > 0) {
+          allGreen = false;
+          console.log(`RED   ${name}: missing ${missing.join(", ")}`);
+        } else {
+          console.log(`green ${name}`);
+        }
+      }
+      console.log(allGreen ? "all required checks attested" : "some required checks are missing");
+      return allGreen ? 0 : 2;
     }
 
     case "untested": {
