@@ -27,8 +27,14 @@ export function lex(src: string): Token[] {
       let j = i + 1;
       let s = "";
       while (j < src.length && src[j] !== '"') {
-        s += src[j];
-        j++;
+        if (src[j] === "\\" && j + 1 < src.length) {
+          const n = src[j + 1];
+          s += n === "n" ? "\n" : n === "t" ? "\t" : n === "r" ? "\r" : n; // \" and \\ fall through to literal
+          j += 2;
+        } else {
+          s += src[j];
+          j++;
+        }
       }
       if (j >= src.length) throw new StrandSyntaxError("unterminated string", i);
       toks.push({ kind: "text", value: s, pos: i });

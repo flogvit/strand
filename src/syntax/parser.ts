@@ -244,12 +244,21 @@ class Parser {
   }
 
   private parseMul(): SurfaceTerm {
-    let left = this.parseApp();
+    let left = this.parseUnary();
     while (this.isAnySym("*", "/", "%")) {
       const op = this.next().value as BinOp;
-      left = { tag: "BinOp", op, left, right: this.parseApp() };
+      left = { tag: "BinOp", op, left, right: this.parseUnary() };
     }
     return left;
+  }
+
+  // prefix minus: `-e` desugars to `0 - e`
+  private parseUnary(): SurfaceTerm {
+    if (this.isSym("-")) {
+      this.next();
+      return { tag: "BinOp", op: "-", left: { tag: "IntLit", value: 0 }, right: this.parseUnary() };
+    }
+    return this.parseApp();
   }
 
   private parseApp(): SurfaceTerm {
