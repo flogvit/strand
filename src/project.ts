@@ -46,6 +46,9 @@ function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfNam
     case "Foreign":
       s = JSON.stringify(t.code);
       break;
+    case "Field":
+      s = `${r(t.record, 8)}.${t.field}`;
+      break;
     case "Var":
       s = t.name;
       break;

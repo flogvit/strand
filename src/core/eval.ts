@@ -184,5 +184,10 @@ export function evalTerm(
       return { tag: "Lam", param: t.param, body: t.body, env: new Map(env), selfDef };
     case "Foreign":
       return fromJs(new Function(`return (${t.code});`)());
+    case "Field": {
+      const rv = rec(t.record, env);
+      if (rv.tag !== "Data") throw new StrandEvalError("field access on a non-record value");
+      return rv.fields[t.index];
+    }
   }
 }

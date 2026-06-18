@@ -14,7 +14,8 @@ export type SurfaceTerm =
   | { tag: "If"; cond: SurfaceTerm; then: SurfaceTerm; else: SurfaceTerm }
   | { tag: "Match"; scrutinee: SurfaceTerm; arms: SurfaceArm[] }
   | { tag: "Let"; name: string; value: SurfaceTerm; body: SurfaceTerm }
-  | { tag: "Lam"; param: string; paramTy: Ty; body: SurfaceTerm };
+  | { tag: "Lam"; param: string; paramTy: Ty; body: SurfaceTerm }
+  | { tag: "Field"; record: SurfaceTerm; field: string };
 
 export interface SurfaceArm {
   ctor: string;
@@ -51,4 +52,11 @@ export interface SurfaceForeign {
   code: string;
 }
 
-export type SurfaceItem = SurfaceDef | SurfaceDataDecl | SurfaceForeign;
+/** A record: sugar for a single-constructor data type with named fields. */
+export interface SurfaceRecord {
+  kind: "record";
+  name: string;
+  fields: { name: string; ty: Ty }[];
+}
+
+export type SurfaceItem = SurfaceDef | SurfaceDataDecl | SurfaceForeign | SurfaceRecord;

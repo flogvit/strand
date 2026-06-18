@@ -1,6 +1,6 @@
 import { parseExpr, parseProgram } from "./syntax/parser.ts";
 import type { SurfaceDef, SurfaceTerm } from "./syntax/ast.ts";
-import { resolveData, resolveDef, resolveForeign, resolveGroupMember, resolveTerm } from "./core/resolve.ts";
+import { resolveData, resolveDef, resolveForeign, resolveGroupMember, resolveRecord, resolveTerm } from "./core/resolve.ts";
 import { infer, typecheckDef, typecheckGroup } from "./core/typecheck.ts";
 import { evalTerm, type Value } from "./core/eval.ts";
 import { Store } from "./core/store.ts";
@@ -47,6 +47,9 @@ function freeNames(t: SurfaceTerm, bound: Set<string>): Set<string> {
         break;
       case "Lam":
         go(s.body, new Set([...b, s.param]));
+        break;
+      case "Field":
+        go(s.record, b);
         break;
       default:
         break;
@@ -110,8 +113,8 @@ export function compileProgram(
   const binds: Bind[] = [];
 
   for (const item of items) {
-    if (item.kind === "data") {
-      const decl = resolveData(item);
+    if (item.kind === "data" || item.kind === "record") {
+      const decl = item.kind === "data" ? resolveData(item) : resolveRecord(item);
       const hash = store.putData(decl);
       decls.push(decl);
       binds.push({ name: decl.name, hash, kind: "data" });

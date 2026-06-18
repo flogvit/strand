@@ -43,7 +43,8 @@ export type CoreTerm =
   | { tag: "Match"; scrutinee: CoreTerm; arms: MatchArm[] }
   | { tag: "Let"; name: string; value: CoreTerm; body: CoreTerm }
   | { tag: "Lam"; param: string; paramTy: Ty; body: CoreTerm }
-  | { tag: "Foreign"; code: string }; // a trusted raw TypeScript expression (body of a foreign def)
+  | { tag: "Foreign"; code: string } // a trusted raw TypeScript expression (body of a foreign def)
+  | { tag: "Field"; record: CoreTerm; field: string; index: number }; // record field access (index filled by typecheck)
 
 export interface Param {
   name: string;
@@ -63,6 +64,8 @@ export interface CoreDef {
 export interface CtorDecl {
   name: string;
   fields: Ty[];
+  /** Field names, for record-style (single-constructor) data types. */
+  fieldNames?: string[];
 }
 
 /** A `data` declaration: a type constructor with parameters and value
@@ -105,6 +108,9 @@ export function depsOf(term: CoreTerm): Hash[] {
         break;
       case "Lam":
         walk(t.body);
+        break;
+      case "Field":
+        walk(t.record);
         break;
       default:
         break;

@@ -1,5 +1,5 @@
 import { StrandResolveError } from "../errors.ts";
-import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceForeign, SurfaceTerm } from "../syntax/ast.ts";
+import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceForeign, SurfaceRecord, SurfaceTerm } from "../syntax/ast.ts";
 import type { Registry } from "./registry.ts";
 import type { CoreDef, CoreTerm, DataDecl, Hash, MatchArm } from "./term.ts";
 
@@ -47,6 +47,8 @@ export function resolveTerm(
       return { tag: "Let", name: t.name, value: rec(t.value, params), body: rec(t.body, new Set([...params, t.name])) };
     case "Lam":
       return { tag: "Lam", param: t.param, paramTy: t.paramTy, body: rec(t.body, new Set([...params, t.param])) };
+    case "Field":
+      return { tag: "Field", record: rec(t.record, params), field: t.field, index: -1 };
   }
 }
 
@@ -100,6 +102,15 @@ export function resolveGroupMember(
 /** A `data` declaration resolves directly — its field types are already types. */
 export function resolveData(d: SurfaceDataDecl): DataDecl {
   return { name: d.name, params: d.params, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields })) };
+}
+
+/** A `record` is sugar for a single-constructor data type with named fields. */
+export function resolveRecord(d: SurfaceRecord): DataDecl {
+  return {
+    name: d.name,
+    params: [],
+    ctors: [{ name: d.name, fields: d.fields.map((f) => f.ty), fieldNames: d.fields.map((f) => f.name) }],
+  };
 }
 
 /** A `foreign` declaration becomes a definition whose body is opaque TS code. */

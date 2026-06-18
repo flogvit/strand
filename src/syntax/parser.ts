@@ -2,9 +2,18 @@ import { StrandSyntaxError } from "../errors.ts";
 import { tBool, tCon, tInt, tText, tFun, tVar, type Ty } from "../core/types.ts";
 import type { BinOp } from "../core/term.ts";
 import { lex, type Token } from "./lexer.ts";
-import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceForeign, SurfaceItem, SurfaceParam, SurfaceTerm } from "./ast.ts";
+import type {
+  SurfaceArm,
+  SurfaceDataDecl,
+  SurfaceDef,
+  SurfaceForeign,
+  SurfaceItem,
+  SurfaceParam,
+  SurfaceRecord,
+  SurfaceTerm,
+} from "./ast.ts";
 
-const RESERVED = new Set(["def", "data", "foreign", "if", "then", "else", "match", "let", "in", "fn"]);
+const RESERVED = new Set(["def", "data", "record", "foreign", "if", "then", "else", "match", "let", "in", "fn"]);
 
 const isUpper = (s: string): boolean => /^[A-Z]/.test(s);
 
@@ -57,10 +66,30 @@ class Parser {
     const items: SurfaceItem[] = [];
     while (!this.atEof()) {
       if (this.isKw("data")) items.push(this.parseData());
+      else if (this.isKw("record")) items.push(this.parseRecord());
       else if (this.isKw("foreign")) items.push(this.parseForeign());
       else items.push(this.parseDef());
     }
     return items;
+  }
+
+  private parseRecord(): SurfaceRecord {
+    this.eatKw("record");
+    const name = this.eatIdent();
+    this.eatSym("{");
+    const fields = [this.parseRecordField()];
+    while (this.isSym(",")) {
+      this.next();
+      fields.push(this.parseRecordField());
+    }
+    this.eatSym("}");
+    return { kind: "record", name, fields };
+  }
+
+  private parseRecordField(): { name: string; ty: Ty } {
+    const name = this.eatIdent();
+    this.eatSym(":");
+    return { name, ty: this.parseType() };
   }
 
   private parseForeign(): SurfaceForeign {
@@ -279,9 +308,19 @@ class Parser {
   }
 
   private parseApp(): SurfaceTerm {
-    let fn = this.parseAtom();
-    while (this.canStartAtom()) fn = { tag: "App", fn, arg: this.parseAtom() };
+    let fn = this.parsePostfix();
+    while (this.canStartAtom()) fn = { tag: "App", fn, arg: this.parsePostfix() };
     return fn;
+  }
+
+  // postfix field access: `record.field`
+  private parsePostfix(): SurfaceTerm {
+    let a = this.parseAtom();
+    while (this.isSym(".")) {
+      this.next();
+      a = { tag: "Field", record: a, field: this.eatIdent() };
+    }
+    return a;
   }
 
   private canStartAtom(): boolean {

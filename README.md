@@ -93,8 +93,10 @@ def greet (name: Text) -> Text = "Hello, " ++ name
 
 - Ground types `Int`, `Bool`, `Text`; curried functions; type constructors
   (`List a`, `Option a`) and type variables — generics checked by unification.
-- `data` declarations (sum types; products are single-constructor data),
-  exhaustive `match` with constructor patterns and a `_` wildcard, recursion
+- `data` declarations (sum types; products are single-constructor data) and
+  `record` types with named fields and `.field` access (`record Point { x: Int,
+  y: Int }`, `p.x`), exhaustive `match` with constructor patterns and a `_`
+  wildcard, recursion
   (self and mutual), `if/then/else`, `let … in …`, lambdas
   (`fn (x: T) -> …`, closures included), arithmetic `+ - * / %` and text `++`,
   comparison `== < > <= >=`, boolean `&& ||`, juxtaposition application.

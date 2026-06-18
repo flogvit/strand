@@ -37,6 +37,19 @@ export function infer(
       return groupTys[t.index];
     case "Foreign":
       throw new StrandTypeError("a foreign body cannot appear in expression position");
+    case "Field": {
+      const rt = u.prune(rec(t.record, env));
+      if (rt.tag !== "Con") throw new StrandTypeError(`cannot read field '.${t.field}' (record type is not known here)`);
+      const decl = registry.types.get(rt.name);
+      if (!decl || decl.ctors.length !== 1 || !decl.ctors[0].fieldNames) {
+        throw new StrandTypeError(`type ${rt.name} is not a record`);
+      }
+      const idx = decl.ctors[0].fieldNames.indexOf(t.field);
+      if (idx < 0) throw new StrandTypeError(`record ${rt.name} has no field '${t.field}'`);
+      t.index = idx;
+      const inst = new Map(decl.params.map((p, i) => [p, rt.args[i]]));
+      return substVars(decl.ctors[0].fields[idx], inst);
+    }
     case "Var": {
       const ty = env.get(t.name);
       if (!ty) throw new StrandTypeError(`unbound variable '${t.name}'`);
