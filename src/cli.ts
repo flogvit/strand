@@ -52,6 +52,8 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand test                  # run all zero-arg Bool definitions as tests
   strand untested              # definitions not reached by any test
   strand partition --agents N  # split the namespace into N non-contending buckets
+  strand log                   # the full work-plane history (every applied step)
+  strand distill               # the clean current namespace, dead steps dropped
   strand require <name> <check...>     # set required checks for a definition
   strand attest <name> <check>         # record an attestation for its content hash
   strand verify                        # check all required checks are attested
@@ -113,6 +115,10 @@ function main(argv: string[]): number {
       repo.namespace = result.namespace;
       repo.conflicts.push(...result.conflicts);
       repo.pending = [];
+      for (const name of result.applied) {
+        const ab = repo.namespace.get(name)!;
+        repo.history.push({ name, hash: ab.hash, by: ab.by, intent: ab.intent });
+      }
       saveRepo(root, repo);
       console.log(`applied  : ${result.applied.sort().join(", ") || "none"}`);
       console.log(`conflicts: ${result.conflicts.map((c) => c.name).join(", ") || "none"}`);
@@ -422,6 +428,33 @@ function main(argv: string[]): number {
       if (components.length < n) {
         console.log(`note: only ${components.length} independent component(s); more agents than that would contend`);
       }
+      return 0;
+    }
+
+    case "log": {
+      requireRepo(root);
+      const repo = loadRepo(root);
+      if (repo.history.length === 0) {
+        console.log("no history yet");
+        return 0;
+      }
+      repo.history.forEach((h, i) => console.log(`${i + 1}. ${h.name.padEnd(16)} ${h.hash}  — ${h.intent} (${h.by})`));
+      return 0;
+    }
+
+    case "distill": {
+      requireRepo(root);
+      const repo = loadRepo(root);
+      const counts = new Map<string, number>();
+      for (const h of repo.history) counts.set(h.name, (counts.get(h.name) ?? 0) + 1);
+      let superseded = 0;
+      for (const [, c] of counts) superseded += c - 1;
+      console.log("distilled — the current namespace (dead steps dropped):");
+      for (const [name, b] of [...repo.namespace].sort((a, z) => a[0].localeCompare(z[0]))) {
+        const n = (counts.get(name) ?? 1) - 1;
+        console.log(`  ${name.padEnd(16)} ${b.hash}  — ${b.intent} (${b.by})${n > 0 ? ` [${n} earlier version(s) superseded]` : ""}`);
+      }
+      console.log(`\n${repo.history.length} step(s) on the work plane → ${repo.namespace.size} definition(s); ${superseded} superseded step(s) distilled away`);
       return 0;
     }
 
