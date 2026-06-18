@@ -1,0 +1,12 @@
+# Error handling with a Result type (depends on the prelude).
+
+data Result a = Ok a | Err Text
+
+def safeDiv (a: Int) (b: Int) -> Result Int =
+  if b == 0 then Err "division by zero" else Ok (a / b)
+
+def orElse (d: Int) (r: Result Int) -> Int =
+  match r { Ok x -> x | Err m -> d }
+
+def isOk (r: Result Int) -> Bool =
+  match r { Ok x -> true | Err m -> false }

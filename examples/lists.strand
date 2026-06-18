@@ -1,0 +1,18 @@
+# Extra list utilities (depends on the prelude: List, Nil, Cons, append).
+
+def revOnto (acc: List a) (xs: List a) -> List a =
+  match xs { Nil -> acc | Cons h t -> revOnto (Cons h acc) t }
+
+def reverse (xs: List a) -> List a = revOnto Nil xs
+
+def take (n: Int) (xs: List a) -> List a =
+  if n < 1 then Nil else match xs { Nil -> Nil | Cons h t -> Cons h (take (n - 1) t) }
+
+def drop (n: Int) (xs: List a) -> List a =
+  if n < 1 then xs else match xs { Nil -> Nil | Cons h t -> drop (n - 1) t }
+
+def elem (x: Int) (xs: List Int) -> Bool =
+  match xs { Nil -> false | Cons h t -> if h == x then true else elem x t }
+
+def foldl (f: b -> a -> b) (z: b) (xs: List a) -> b =
+  match xs { Nil -> z | Cons h t -> foldl f (f z h) t }

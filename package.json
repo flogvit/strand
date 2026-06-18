@@ -8,6 +8,7 @@
     "strand-ts": "tsx src/ts/cli.ts",
     "demo": "bash examples/swarm.sh",
     "demo:ts": "bash examples/ts-swarm.sh",
+    "emit-examples": "tsx scripts/emit-examples.ts",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {

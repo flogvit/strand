@@ -1,0 +1,22 @@
+# A generic binary search tree, plus a tree sort (depends on the prelude).
+
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+
+def insert (x: Int) (t: Tree Int) -> Tree Int =
+  match t {
+    Leaf -> Node Leaf x Leaf
+  | Node l v r -> if x < v then Node (insert x l) v r else Node l v (insert x r)
+  }
+
+def member (x: Int) (t: Tree Int) -> Bool =
+  match t {
+    Leaf -> false
+  | Node l v r -> if x == v then true else if x < v then member x l else member x r
+  }
+
+def inorder (t: Tree Int) -> List Int =
+  match t { Leaf -> Nil | Node l v r -> append (inorder l) (Cons v (inorder r)) }
+
+def fromList (xs: List Int) -> Tree Int = foldr insert Leaf xs
+
+def treesort (xs: List Int) -> List Int = inorder (fromList xs)

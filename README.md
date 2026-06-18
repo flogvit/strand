@@ -100,8 +100,11 @@ def greet (name: Text) -> Text = "Hello, " ++ name
   comparison `== < > <= >=`, boolean `&& ||`, juxtaposition application.
 - A prelude (`lib/prelude.strand`) — `List`, `Option`, `map`, `filter`, `foldr`,
   `length`, `append`, `range`, `sum` — written in Strand itself.
-- A real example (`examples/program.strand`): quicksort and an
-  arithmetic-expression evaluator over an ADT.
+- Real examples in `examples/` — quicksort + an expression evaluator
+  (`program.strand`), list utilities (`lists.strand`), a generic binary search
+  tree and tree sort (`trees.strand`), and `Result`-based error handling
+  (`result.strand`). `npm run emit-examples` writes each one's transpiled
+  TypeScript to `examples/out/` so the Strand → TS mapping is visible.
 
 ```bash
 npm run strand -- init
