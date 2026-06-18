@@ -7,10 +7,13 @@ export interface Registry {
   ctors: Map<string, { decl: DataDecl; ctor: CtorDecl; tag: number }>;
 }
 
+// Always-available built-in type, used by the IO primitives.
+const UNIT_DECL: DataDecl = { name: "Unit", params: [], ctors: [{ name: "Unit", fields: [] }] };
+
 export function buildRegistry(decls: DataDecl[]): Registry {
   const types = new Map<string, DataDecl>();
   const ctors = new Map<string, { decl: DataDecl; ctor: CtorDecl; tag: number }>();
-  for (const d of decls) {
+  for (const d of [UNIT_DECL, ...decls]) {
     types.set(d.name, d);
     d.ctors.forEach((c, tag) => ctors.set(c.name, { decl: d, ctor: c, tag }));
   }

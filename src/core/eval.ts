@@ -2,10 +2,12 @@ import { StrandEvalError } from "../errors.ts";
 import type { Registry } from "./registry.ts";
 import type { Store } from "./store.ts";
 import type { BinOp, CoreDef, CoreTerm } from "./term.ts";
+import { PRIM_ARITY } from "./prims.ts";
 
 /** Runtime values. A named function is a Closure; an anonymous function is a Lam
  *  (capturing its environment); a partially-applied constructor is a Ctor; a
- *  fully-applied constructor is a Data value. */
+ *  fully-applied constructor is a Data value; an IO is a deferred effect; a
+ *  Native is a partially-applied built-in primitive. */
 export type Value =
   | { tag: "Int"; value: number }
   | { tag: "Bool"; value: boolean }
@@ -13,7 +15,9 @@ export type Value =
   | { tag: "Closure"; def: CoreDef; applied: Value[] }
   | { tag: "Lam"; param: string; body: CoreTerm; env: Map<string, Value>; selfDef?: CoreDef }
   | { tag: "Ctor"; ctor: string; arity: number; args: Value[] }
-  | { tag: "Data"; ctor: string; fields: Value[] };
+  | { tag: "Data"; ctor: string; fields: Value[] }
+  | { tag: "IO"; run: () => Value }
+  | { tag: "Native"; name: string; arity: number; args: Value[] };
 
 function atom(v: Value): string {
   return v.tag === "Data" && v.fields.length > 0 ? `(${valueToString(v)})` : valueToString(v);
@@ -35,7 +39,32 @@ export function valueToString(v: Value): string {
       return `<ctor ${v.ctor}/${v.arity - v.args.length}>`;
     case "Data":
       return v.fields.length ? `${v.ctor} ${v.fields.map(atom).join(" ")}` : v.ctor;
+    case "IO":
+      return "<io>";
+    case "Native":
+      return `<prim ${v.name}/${v.arity - v.args.length}>`;
   }
+}
+
+const UNIT: Value = { tag: "Data", ctor: "Unit", fields: [] };
+
+function runPrim(name: string, args: Value[], store: Store, registry: Registry): Value {
+  switch (name) {
+    case "print":
+      return { tag: "IO", run: () => (console.log((args[0] as { value: string }).value), UNIT) };
+    case "pure":
+      return { tag: "IO", run: () => args[0] };
+    case "andThen":
+      return {
+        tag: "IO",
+        run: () => {
+          const a = (args[0] as { tag: "IO"; run: () => Value }).run();
+          const next = apply(args[1], a, store, registry);
+          return (next as { tag: "IO"; run: () => Value }).run();
+        },
+      };
+  }
+  throw new StrandEvalError(`unknown primitive '${name}'`);
 }
 
 function structuralEq(a: Value, b: Value): boolean {
@@ -96,6 +125,11 @@ function callForeign(def: CoreDef, args: Value[]): Value {
 }
 
 function apply(fn: Value, arg: Value, store: Store, registry: Registry): Value {
+  if (fn.tag === "Native") {
+    const args = [...fn.args, arg];
+    if (args.length < fn.arity) return { tag: "Native", name: fn.name, arity: fn.arity, args };
+    return runPrim(fn.name, args, store, registry);
+  }
   if (fn.tag === "Ctor") {
     const args = [...fn.args, arg];
     if (args.length < fn.arity) return { tag: "Ctor", ctor: fn.ctor, arity: fn.arity, args };
@@ -189,5 +223,7 @@ export function evalTerm(
       if (rv.tag !== "Data") throw new StrandEvalError("field access on a non-record value");
       return rv.fields[t.index];
     }
+    case "Prim":
+      return { tag: "Native", name: t.name, arity: PRIM_ARITY[t.name], args: [] };
   }
 }

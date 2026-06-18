@@ -49,6 +49,9 @@ function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfNam
     case "Field":
       s = `${r(t.record, 8)}.${t.field}`;
       break;
+    case "Prim":
+      s = t.name;
+      break;
     case "Var":
       s = t.name;
       break;

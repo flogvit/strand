@@ -4,6 +4,7 @@ import type { Store } from "./store.ts";
 import type { CoreDef, CoreTerm, CtorDecl, DataDecl } from "./term.ts";
 import { tBool, tCon, tInt, tText, tFun, tVar, tyOfSignature, type Ty } from "./types.ts";
 import { freshFlex, instantiate, substVars, Unifier } from "./unify.ts";
+import { PRIMS } from "./prims.ts";
 
 /** The (polymorphic) type scheme of a constructor: fields -> the data type. */
 function ctorType(decl: DataDecl, ctor: CtorDecl): Ty {
@@ -37,6 +38,8 @@ export function infer(
       return groupTys[t.index];
     case "Foreign":
       throw new StrandTypeError("a foreign body cannot appear in expression position");
+    case "Prim":
+      return instantiate(PRIMS[t.name]);
     case "Field": {
       const rt = u.prune(rec(t.record, env));
       if (rt.tag !== "Con") throw new StrandTypeError(`cannot read field '.${t.field}' (record type is not known here)`);

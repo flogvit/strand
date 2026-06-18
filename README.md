@@ -103,6 +103,8 @@ def greet (name: Text) -> Text = "Hello, " ++ name
 - Foreign TypeScript via `foreign name (p: T) -> R = "<ts expr>"` — a trusted
   binding the checker takes on faith and the backend emits verbatim (e.g.
   `foreign sqrtFloor (n: Int) -> Int = "Math.floor(Math.sqrt(n))"`).
+- A minimal IO monad — `print : Text -> IO Unit`, `pure`, `andThen`, with `Unit`
+  and `IO` types. Run an action with `strand exec <name>`; transpiles to thunks.
 - A prelude (`lib/prelude.strand`) — `List`, `Option`, `map`, `filter`, `foldr`,
   `length`, `append`, `range`, `sum` — written in Strand itself.
 - Real examples in `examples/` — quicksort + an expression evaluator

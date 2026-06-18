@@ -1,5 +1,6 @@
 import { StrandResolveError } from "../errors.ts";
 import type { SurfaceArm, SurfaceDataDecl, SurfaceDef, SurfaceForeign, SurfaceRecord, SurfaceTerm } from "../syntax/ast.ts";
+import { PRIMS } from "./prims.ts";
 import type { Registry } from "./registry.ts";
 import type { CoreDef, CoreTerm, DataDecl, Hash, MatchArm } from "./term.ts";
 
@@ -27,6 +28,7 @@ export function resolveTerm(
       if (self !== undefined && t.name === self) return { tag: "Self" };
       const c = registry.ctors.get(t.name);
       if (c) return { tag: "Ctor", type: c.decl.name, ctor: t.name };
+      if (PRIMS[t.name] !== undefined) return { tag: "Prim", name: t.name };
       const h = names.get(t.name);
       if (!h) throw new StrandResolveError(`unknown name '${t.name}'`);
       return { tag: "Ref", hash: h };

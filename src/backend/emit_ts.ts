@@ -30,6 +30,13 @@ const TS_OP: Record<string, string> = {
   "==": "===", "&&": "&&", "||": "||", "++": "+",
 };
 
+// IO primitives transpile to TypeScript thunks (an IO a is a () => a).
+const PRIM_TS: Record<string, string> = {
+  print: "((s) => () => { console.log(s); return undefined; })",
+  pure: "((x) => () => x)",
+  andThen: "((io) => (f) => () => { const a = io(); return f(a)(); })",
+};
+
 function tsName(hash: Hash, nameOf: Map<Hash, string>): string {
   return nameOf.get(hash) ?? "_h" + hash.replace(/[^A-Za-z0-9]/g, "");
 }
@@ -51,6 +58,8 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string, grou
       return `(${t.code})`;
     case "Field":
       return `${e(t.record)}.f${t.index}`;
+    case "Prim":
+      return PRIM_TS[t.name];
     case "Var":
       return t.name;
     case "Ref":

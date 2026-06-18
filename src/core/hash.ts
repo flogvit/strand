@@ -24,6 +24,8 @@ function canonicalTerm(t: CoreTerm, rename: Map<string, string>, depth: number):
       return { tag: "Foreign", code: t.code };
     case "Field":
       return { tag: "Field", field: t.field, index: t.index, record: rec(t.record) };
+    case "Prim":
+      return { tag: "Prim", name: t.name };
     case "Ctor":
       return { tag: "Ctor", type: t.type, ctor: t.ctor };
     case "App":

@@ -44,7 +44,8 @@ export type CoreTerm =
   | { tag: "Let"; name: string; value: CoreTerm; body: CoreTerm }
   | { tag: "Lam"; param: string; paramTy: Ty; body: CoreTerm }
   | { tag: "Foreign"; code: string } // a trusted raw TypeScript expression (body of a foreign def)
-  | { tag: "Field"; record: CoreTerm; field: string; index: number }; // record field access (index filled by typecheck)
+  | { tag: "Field"; record: CoreTerm; field: string; index: number } // record field access (index filled by typecheck)
+  | { tag: "Prim"; name: string }; // a built-in primitive (IO)
 
 export interface Param {
   name: string;

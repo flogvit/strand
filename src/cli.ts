@@ -53,6 +53,7 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand require <name> <check...>     # set required checks for a definition
   strand attest <name> <check>         # record an attestation for its content hash
   strand verify                        # check all required checks are attested
+  strand exec <name>           # run an IO action (interpreter)
   strand run <name>            # transpile to TS and execute
   strand emit [--out <file>]   # transpile namespace to TypeScript
   strand export [--out <file>] # write the namespace as Strand source (for git)
@@ -172,6 +173,17 @@ function main(argv: string[]): number {
           evalQuery(expr, repo.store, valueNamesOf(repo.namespace, repo.store), registryOf(repo.namespace, repo.store)),
         ),
       );
+      return 0;
+    }
+
+    case "exec": {
+      requireRepo(root);
+      const name = positionals[1];
+      if (!name) throw new StrandError("exec needs a <name : IO _>");
+      const repo = loadRepo(root);
+      const v = evalQuery(name, repo.store, valueNamesOf(repo.namespace, repo.store), registryOf(repo.namespace, repo.store));
+      if (v.tag === "IO") v.run();
+      else console.log(valueToString(v));
       return 0;
     }
 
