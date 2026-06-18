@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { assemble } from "./assemble.ts";
+import { typecheckModule } from "./typecheck.ts";
 import { GreenGateError, submit } from "./engine.ts";
 import { mergeTs, resolveConflict } from "./merge.ts";
 import { initRepo, loadRepo, repoExists, saveRepo } from "./persist.ts";
@@ -95,7 +96,15 @@ function main(argv: string[]): number {
       console.log(`applied  : ${result.applied.sort().join(", ") || "none"}`);
       console.log(`conflicts: ${result.conflicts.map((c) => c.name).join(", ") || "none"}`);
       console.log(`rejected : ${result.rejected.map((r) => `${r.name}(${r.reason})`).join(", ") || "none"}`);
-      return result.conflicts.length > 0 ? 2 : 0;
+      // whole-namespace green-gate: catch cross-file breaks between individually-green submissions
+      const diags = typecheckModule(assemble(repo.namespace, repo.store));
+      if (diags.length > 0) {
+        console.log(`green-gate: RED`);
+        for (const d of diags) console.log(`  ${d}`);
+      } else {
+        console.log(`green-gate: green`);
+      }
+      return result.conflicts.length > 0 || diags.length > 0 ? 2 : 0;
     }
 
     case "ls": {

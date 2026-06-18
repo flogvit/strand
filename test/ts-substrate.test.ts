@@ -48,6 +48,20 @@ test("a dependency must be in the namespace before a dependent can be submitted"
   );
 });
 
+test("whole-namespace gate at merge catches a cross-file break between two green submissions", () => {
+  const s = state();
+  submit(s, "a", "f", "export function f(): number { return 1; }");
+  s.namespace = mergeTs(s.namespace, s.store, s.pending).namespace;
+  s.pending = [];
+  // both of the next two are green on their own against the base {f: number}...
+  submit(s, "b", "g uses f as number", "export const g = (): number => f() + 1;");
+  submit(s, "c", "rebind f to string", 'export function f(): string { return "x"; }');
+  // ...but together they are red: g now adds 1 to a string and returns it as number
+  const r = mergeTs(s.namespace, s.store, s.pending);
+  const diags = typecheckModule(assemble(r.namespace, s.store));
+  assert.ok(diags.length > 0, "whole-namespace check should flag the cross-file break");
+});
+
 test("the merged namespace assembles into a module that type-checks green", () => {
   const s = state();
   submit(s, "a", "adder", "export function add(a: number, b: number): number { return a + b; }");
