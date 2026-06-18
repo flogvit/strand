@@ -115,6 +115,13 @@ export function evalTerm(
     case "Self":
       if (!selfDef) throw new StrandEvalError("`Self` used outside a definition");
       return { tag: "Closure", def: selfDef, applied: [] };
+    case "Cyc": {
+      if (!selfDef || !selfDef.group) throw new StrandEvalError("`Cyc` used outside a recursive group");
+      const def = store.defOf(selfDef.group[t.index]);
+      if (!def) throw new StrandEvalError(`dangling group member ${t.index}`);
+      if (def.params.length === 0) return evalTerm(def.body, new Map(), store, registry, def);
+      return { tag: "Closure", def, applied: [] };
+    }
     case "Var": {
       const v = env.get(t.name);
       if (!v) throw new StrandEvalError(`unbound variable '${t.name}'`);

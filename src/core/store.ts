@@ -19,6 +19,12 @@ export class Store {
     return h;
   }
 
+  /** Store a definition at an explicit hash (used for mutually-recursive group
+   *  members, whose hash is derived from the group hash plus their index). */
+  putAt(hash: Hash, def: CoreDef, ty: Ty): void {
+    if (!this.objects.has(hash)) this.objects.set(hash, { kind: "def", def, ty });
+  }
+
   putData(data: DataDecl): Hash {
     const h = hashData(data);
     if (!this.objects.has(h)) this.objects.set(h, { kind: "data", data });

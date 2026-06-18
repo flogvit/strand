@@ -19,8 +19,9 @@ export function infer(
   registry: Registry,
   u: Unifier,
   selfTy?: Ty,
+  groupTys?: Ty[],
 ): Ty {
-  const rec = (s: CoreTerm, e: Map<string, Ty>): Ty => infer(s, e, store, registry, u, selfTy);
+  const rec = (s: CoreTerm, e: Map<string, Ty>): Ty => infer(s, e, store, registry, u, selfTy, groupTys);
   switch (t.tag) {
     case "IntLit":
       return tInt;
@@ -31,6 +32,9 @@ export function infer(
     case "Self":
       if (!selfTy) throw new StrandTypeError("recursion is not allowed here");
       return selfTy;
+    case "Cyc":
+      if (!groupTys) throw new StrandTypeError("mutual recursion is not allowed here");
+      return groupTys[t.index];
     case "Var": {
       const ty = env.get(t.name);
       if (!ty) throw new StrandTypeError(`unbound variable '${t.name}'`);
@@ -139,4 +143,19 @@ export function typecheckDef(def: CoreDef, store: Store, registry: Registry): Ty
   const bodyTy = infer(def.body, env, store, registry, u, selfTy);
   u.unify(bodyTy, def.ret);
   return selfTy;
+}
+
+/** Typecheck a mutually-recursive group: each member's body is checked with all
+ *  members' declared types available as `Cyc` references. Returns the members'
+ *  types in order. */
+export function typecheckGroup(defs: CoreDef[], store: Store, registry: Registry): Ty[] {
+  const groupTys = defs.map((d) => tyOfSignature(d.params.map((p) => p.ty), d.ret));
+  for (const d of defs) {
+    const u = new Unifier();
+    const env = new Map<string, Ty>();
+    for (const p of d.params) env.set(p.name, p.ty);
+    const bodyTy = infer(d.body, env, store, registry, u, undefined, groupTys);
+    u.unify(bodyTy, d.ret);
+  }
+  return groupTys;
 }

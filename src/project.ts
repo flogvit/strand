@@ -23,8 +23,8 @@ function precedence(t: CoreTerm): number {
   }
 }
 
-function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfName: string): string {
-  const r = (s: CoreTerm, c: number): string => renderTerm(s, nameOf, c, selfName);
+function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfName: string, groupNames: string[] = []): string {
+  const r = (s: CoreTerm, c: number): string => renderTerm(s, nameOf, c, selfName, groupNames);
   const p = precedence(t);
   let s: string;
   switch (t.tag) {
@@ -39,6 +39,9 @@ function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfNam
       break;
     case "Self":
       s = selfName;
+      break;
+    case "Cyc":
+      s = groupNames[t.index] ?? `cyc${t.index}`;
       break;
     case "Var":
       s = t.name;
@@ -97,7 +100,8 @@ export function renderDef(name: string, hash: Hash, store: Store, nameOf: Map<Ha
   if (!def) return `def ${name} = <missing ${hash}>`;
   const params = def.params.map((p) => `(${p.name}: ${tyToString(p.ty)})`).join(" ");
   const head = params ? `def ${name} ${params}` : `def ${name}`;
-  return `${head} -> ${tyToString(def.ret)} = ${renderTerm(def.body, nameOf, 0, name)}`;
+  const groupNames = def.group ? def.group.map((h) => nameOf.get(h) ?? h) : [];
+  return `${head} -> ${tyToString(def.ret)} = ${renderTerm(def.body, nameOf, 0, name, groupNames)}`;
 }
 
 export function projectNamespace(namespace: Namespace, store: Store, conflicts: Conflict[] = []): string {

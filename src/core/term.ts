@@ -38,6 +38,7 @@ export type CoreTerm =
   | { tag: "BinOp"; op: BinOp; left: CoreTerm; right: CoreTerm }
   | { tag: "If"; cond: CoreTerm; then: CoreTerm; else: CoreTerm }
   | { tag: "Self" }
+  | { tag: "Cyc"; index: number } // a reference to the index-th member of the current recursive group
   | { tag: "Ctor"; type: string; ctor: string }
   | { tag: "Match"; scrutinee: CoreTerm; arms: MatchArm[] }
   | { tag: "Let"; name: string; value: CoreTerm; body: CoreTerm }
@@ -52,6 +53,10 @@ export interface CoreDef {
   params: Param[];
   ret: Ty;
   body: CoreTerm;
+  /** For a member of a mutually-recursive group: the hashes of all group
+   *  members (including this one), indexed as the body's `Cyc` nodes expect.
+   *  Post-hoc metadata — not part of the content hash. */
+  group?: Hash[];
 }
 
 export interface CtorDecl {

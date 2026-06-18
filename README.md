@@ -94,8 +94,8 @@ def greet (name: Text) -> Text = "Hello, " ++ name
 - Ground types `Int`, `Bool`, `Text`; curried functions; type constructors
   (`List a`, `Option a`) and type variables — generics checked by unification.
 - `data` declarations (sum types; products are single-constructor data),
-  exhaustive `match` with constructor patterns and a `_` wildcard, recursion,
-  `if/then/else`, `let … in …`, lambdas
+  exhaustive `match` with constructor patterns and a `_` wildcard, recursion
+  (self and mutual), `if/then/else`, `let … in …`, lambdas
   (`fn (x: T) -> …`, closures included), arithmetic `+ - * / %` and text `++`,
   comparison `== < > <= >=`, boolean `&& ||`, juxtaposition application.
 - A prelude (`lib/prelude.strand`) — `List`, `Option`, `map`, `filter`, `foldr`,
@@ -122,7 +122,10 @@ A working language, not (yet) a production one. The conflict-free substrate
 covers every definition — values *and* types — and whole-namespace type-checking
 runs at merge, so a type rebind that would turn a green definition red is caught.
 
+`Int` is a 64-bit-safe integer (a JavaScript double, exact to 2^53−1);
+arbitrary-precision integers are out of scope.
+
 Deliberately out of scope for now: side-effecting I/O (programs compute values;
-`eval`/`run` print them), type inference (signatures are explicit), modules
-beyond the flat namespace, and mutual recursion (self-recursion is supported).
-Value references are by content hash (identity); type references are by name.
+`eval`/`run` print them), type inference (signatures are explicit), and modules
+beyond the flat namespace. Value references are by content hash (identity); type
+references are by name.

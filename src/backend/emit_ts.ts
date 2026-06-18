@@ -34,8 +34,8 @@ function tsName(hash: Hash, nameOf: Map<Hash, string>): string {
   return nameOf.get(hash) ?? "_h" + hash.replace(/[^A-Za-z0-9]/g, "");
 }
 
-function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string): string {
-  const e = (s: CoreTerm): string => emitTerm(s, nameOf, selfName);
+function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string, groupNames: string[] = []): string {
+  const e = (s: CoreTerm): string => emitTerm(s, nameOf, selfName, groupNames);
   switch (t.tag) {
     case "IntLit":
       return String(t.value);
@@ -45,6 +45,8 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string): str
       return JSON.stringify(t.value);
     case "Self":
       return selfName;
+    case "Cyc":
+      return groupNames[t.index];
     case "Var":
       return t.name;
     case "Ref":
@@ -102,7 +104,8 @@ function emitData(decl: DataDecl): string {
 
 function emitDef(name: string, hash: Hash, store: Store, nameOf: Map<Hash, string>): string {
   const def = store.defOf(hash)!;
-  const body = emitTerm(def.body, nameOf, name);
+  const groupNames = def.group ? def.group.map((h) => tsName(h, nameOf)) : [];
+  const body = emitTerm(def.body, nameOf, name, groupNames);
   if (def.params.length === 0) return `export const ${name}: ${tsType(def.ret)} = ${body};`;
   const ps = def.params;
   let s = `(${ps[ps.length - 1].name}: ${tsType(ps[ps.length - 1].ty)}): ${tsType(def.ret)} => ${body}`;

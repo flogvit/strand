@@ -18,6 +18,8 @@ function canonicalTerm(t: CoreTerm, rename: Map<string, string>, depth: number):
       return { tag: "Ref", hash: t.hash };
     case "Self":
       return { tag: "Self" };
+    case "Cyc":
+      return { tag: "Cyc", index: t.index };
     case "Ctor":
       return { tag: "Ctor", type: t.type, ctor: t.ctor };
     case "App":
@@ -60,17 +62,30 @@ function canonicalTerm(t: CoreTerm, rename: Map<string, string>, depth: number):
   }
 }
 
-/** Content address of a value definition. */
-export function hashOf(def: CoreDef): Hash {
+function canonicalDef(def: CoreDef): unknown {
   const rename = new Map<string, string>();
   def.params.forEach((p, i) => rename.set(p.name, `$${i}`));
-  return sha(
-    JSON.stringify({
-      params: def.params.map((p, i) => ({ name: `$${i}`, ty: tyToString(p.ty) })),
-      ret: tyToString(def.ret),
-      body: canonicalTerm(def.body, rename, 0),
-    }),
-  );
+  return {
+    params: def.params.map((p, i) => ({ name: `$${i}`, ty: tyToString(p.ty) })),
+    ret: tyToString(def.ret),
+    body: canonicalTerm(def.body, rename, 0),
+  };
+}
+
+/** Content address of a value definition. */
+export function hashOf(def: CoreDef): Hash {
+  return sha(JSON.stringify(canonicalDef(def)));
+}
+
+/** Content address of a mutually-recursive group, hashed as a unit (in-group
+ *  references are `Cyc` placeholders, so the hash is well-founded). */
+export function hashGroup(defs: CoreDef[]): Hash {
+  return sha(JSON.stringify(defs.map(canonicalDef)));
+}
+
+/** The hash of the index-th member of a group. */
+export function memberHash(groupHash: Hash, index: number): Hash {
+  return `${groupHash}.${index}`;
 }
 
 function renameTyVars(t: Ty, m: Map<string, string>): Ty {
