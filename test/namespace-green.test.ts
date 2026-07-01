@@ -27,6 +27,22 @@ test("a freshly merged namespace is green", () => {
   assert.deepEqual(typecheckNamespace(ns, store), []);
 });
 
+test("the whole-namespace gate re-checks a mutually-recursive group as a group", () => {
+  // Regression: typecheckNamespace used to check every def individually, so a
+  // mutual group's `Cyc` cross-references failed ("mutual recursion is not
+  // allowed here") at merge even though they passed at submit.
+  const store = new Store();
+  const ns: Namespace = new Map();
+  bindInto(
+    ns,
+    store,
+    "a",
+    "def isEven (n: Int) -> Bool = if n < 1 then true else isOdd (n - 1)\n" +
+      "def isOdd (n: Int) -> Bool = if n < 1 then false else isEven (n - 1)",
+  );
+  assert.deepEqual(typecheckNamespace(ns, store), []);
+});
+
 test("content-addressed types: a green definition survives a type-name rebind", () => {
   const store = new Store();
   const ns: Namespace = new Map();
