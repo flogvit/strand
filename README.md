@@ -109,8 +109,9 @@ def greet (name: Text) -> Text = "Hello, " ++ name
   `length`, `append`, `range`, `sum` — written in Strand itself.
 - Real examples in `examples/` — quicksort + an expression evaluator
   (`program.strand`), list utilities (`lists.strand`), a generic binary search
-  tree and tree sort (`trees.strand`), and `Result`-based error handling
-  (`result.strand`). `npm run emit-examples` writes each one's transpiled
+  tree and tree sort (`trees.strand`), `Result`-based error handling
+  (`result.strand`), and a uniqueness-checked Sudoku generator
+  (`sudoku.strand`). `npm run emit-examples` writes each one's transpiled
   TypeScript to `examples/out/` so the Strand → TS mapping is visible.
 
 ```bash

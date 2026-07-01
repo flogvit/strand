@@ -1,0 +1,87 @@
+# A Sudoku generator in Strand (depends on the prelude: List, Nil, Cons, Option, None, Some).
+# Board = List Int of length 81, row-major, 0 = empty, 1..9 = filled.
+# Integer `/` truncates, so idx/9 is the row and idx%9 the column.
+
+def zeros (n: Int) -> List Int = if n < 1 then Nil else Cons 0 (zeros (n - 1))
+def emptyBoard -> List Int = zeros 81
+
+def nth (i: Int) (xs: List Int) -> Int =
+  match xs { Nil -> 0 | Cons h t -> if i < 1 then h else nth (i - 1) t }
+
+def setAt (i: Int) (v: Int) (xs: List Int) -> List Int =
+  match xs { Nil -> Nil | Cons h t -> if i < 1 then Cons v t else Cons h (setAt (i - 1) v t) }
+
+# --- legality of placing value v at index i ---
+
+def rowConf (k: Int) (i: Int) (v: Int) (b: List Int) -> Bool =
+  if k > 8 then false
+  else if (i / 9) * 9 + k == i then rowConf (k + 1) i v b
+  else if nth ((i / 9) * 9 + k) b == v then true
+  else rowConf (k + 1) i v b
+
+def colConf (k: Int) (i: Int) (v: Int) (b: List Int) -> Bool =
+  if k > 8 then false
+  else if k * 9 + (i % 9) == i then colConf (k + 1) i v b
+  else if nth (k * 9 + (i % 9)) b == v then true
+  else colConf (k + 1) i v b
+
+def boxConf (k: Int) (i: Int) (v: Int) (b: List Int) -> Bool =
+  if k > 8 then false
+  else if (i / 9 / 3 * 3 + k / 3) * 9 + (i % 9 / 3 * 3 + k % 3) == i then boxConf (k + 1) i v b
+  else if nth ((i / 9 / 3 * 3 + k / 3) * 9 + (i % 9 / 3 * 3 + k % 3)) b == v then true
+  else boxConf (k + 1) i v b
+
+def rowOk (i: Int) (v: Int) (b: List Int) -> Bool = if rowConf 0 i v b then false else true
+def colOk (i: Int) (v: Int) (b: List Int) -> Bool = if colConf 0 i v b then false else true
+def boxOk (i: Int) (v: Int) (b: List Int) -> Bool = if boxConf 0 i v b then false else true
+
+def valid (i: Int) (v: Int) (b: List Int) -> Bool = rowOk i v b && colOk i v b && boxOk i v b
+
+def firstEmpty (idx: Int) (b: List Int) -> Int =
+  if idx > 80 then 81 else if nth idx b == 0 then idx else firstEmpty (idx + 1) b
+
+# --- seeded backtracking solver (seed rotates the value order for variety) ---
+
+def solve (seed: Int) (b: List Int) -> Option (List Int) =
+  if firstEmpty 0 b > 80 then Some b else tryK (firstEmpty 0 b) 0 seed b
+
+def tryK (i: Int) (k: Int) (seed: Int) (b: List Int) -> Option (List Int) =
+  if k > 8 then None
+  else if valid i ((seed + k) % 9 + 1) b then
+    match solve seed (setAt i ((seed + k) % 9 + 1) b) {
+      Some s -> Some s
+    | None -> tryK i (k + 1) seed b
+    }
+  else tryK i (k + 1) seed b
+
+# --- bounded solution counting (cap keeps uniqueness checks cheap) ---
+
+def countSolutions (b: List Int) (cap: Int) -> Int =
+  if cap < 1 then 0
+  else if firstEmpty 0 b > 80 then 1
+  else countVals (firstEmpty 0 b) 1 b cap
+
+def countVals (i: Int) (v: Int) (b: List Int) (cap: Int) -> Int =
+  if v > 9 then 0
+  else if cap < 1 then 0
+  else if valid i v b then
+    let here = countSolutions (setAt i v b) cap in here + countVals i (v + 1) b (cap - here)
+  else countVals i (v + 1) b cap
+
+def isUnique (b: List Int) -> Bool = countSolutions b 2 == 1
+
+# --- full board, then dig holes preserving uniqueness ---
+
+def fullBoard (seed: Int) -> List Int =
+  match solve seed emptyBoard { Some b -> b | None -> emptyBoard }
+
+def dig (j: Int) (start: Int) (holes: Int) (b: List Int) -> List Int =
+  if j > 80 then b
+  else if holes < 1 then b
+  else if nth ((start + j) % 81) b == 0 then dig (j + 1) start holes b
+  else
+    let dug = setAt ((start + j) % 81) 0 b in
+    if isUnique dug then dig (j + 1) start (holes - 1) dug
+    else dig (j + 1) start holes b
+
+def generate (seed: Int) (holes: Int) -> List Int = dig 0 seed holes (fullBoard seed)

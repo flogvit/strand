@@ -9,7 +9,7 @@ import type { Namespace } from "../src/model.ts";
 // mapping is visible in examples/out/.
 const root = process.cwd();
 const prelude = readFileSync(join(root, "lib", "prelude.strand"), "utf8");
-const examples = ["program", "lists", "trees", "result"];
+const examples = ["program", "lists", "trees", "result", "sudoku"];
 
 mkdirSync(join(root, "examples", "out"), { recursive: true });
 

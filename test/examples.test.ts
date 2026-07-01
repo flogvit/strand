@@ -48,3 +48,14 @@ test("result example (safe division)", () => {
   assert.equal(valueToString(evalQuery("orElse 0 (safeDiv 1 0)", store, names, registry)), "0");
   assert.equal(valueToString(evalQuery("isOk (safeDiv 1 0)", store, names, registry)), "false");
 });
+
+test("sudoku example (generator produces uniquely-solvable puzzles)", () => {
+  // Run through the transpiled TypeScript — much faster than the interpreter for
+  // the backtracking search.
+  const { store, ns } = buildExample("sudoku");
+  assert.equal(runT(ns, store, "isUnique(fullBoard(0))"), "true"); // a complete board has one solution
+  assert.equal(runT(ns, store, "countSolutions(emptyBoard)(2)"), "2"); // bounded counter caps at 2
+  assert.equal(runT(ns, store, "isUnique(generate(0)(12))"), "true"); // a dug puzzle stays unique
+  // different seeds give different boards
+  assert.notEqual(runT(ns, store, "nth(5)(fullBoard(0))"), runT(ns, store, "nth(5)(fullBoard(4))"));
+});
