@@ -115,6 +115,16 @@ export function view(state: CrdtNamespace): { namespace: Namespace; conflicts: C
   return { namespace, conflicts };
 }
 
+/** Serialize CRDT state for the wire (plain JSON — obs and resolution are already
+ *  flat objects). */
+export function toJSON(ns: CrdtNamespace): Record<string, NameState> {
+  return Object.fromEntries(ns);
+}
+
+export function fromJSON(obj: Record<string, NameState>): CrdtNamespace {
+  return new Map(Object.entries(obj));
+}
+
 /** Lift a resolved namespace into CRDT state (each name a single observation). */
 export function fromNamespace(ns: Namespace): CrdtNamespace {
   const out: CrdtNamespace = new Map();

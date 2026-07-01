@@ -54,6 +54,18 @@ export class Store {
     return s && s.kind === "def" ? s.ty : undefined;
   }
 
+  /** Every hash the store holds — the grow-only set a peer reconciles against. */
+  hashes(): Hash[] {
+    return [...this.objects.keys()];
+  }
+
+  /** Insert a received item verbatim at its hash (append-only, idempotent). Used
+   *  when syncing objects between peers: content-addressing means two peers that
+   *  computed the same definition land on the same hash, so the union converges. */
+  putItem(hash: Hash, item: StoredItem): void {
+    if (!this.objects.has(hash)) this.objects.set(hash, item);
+  }
+
   isResolvable(h: Hash): boolean {
     const s = this.objects.get(h);
     if (!s) return false;
