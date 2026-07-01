@@ -29,11 +29,11 @@ test("independent components go to different agents, intact", () => {
   assert.notEqual(aLine, bLine); // different agents
 });
 
-test("a connected component is not split, and the contention is reported", () => {
+test("a connected component is split along a seam, and the cut is reported", () => {
   const dir = repo("def x -> Int = 1\ndef y -> Int = x + 1\ndef z -> Int = y + 1");
   const out = cli(dir, ["partition", "--agents", "2"]);
   const agentLines = out.split("\n").filter((l) => l.startsWith("agent"));
   const withDefs = agentLines.filter((l) => /[xyz]/.test(l.split(":")[1] ?? ""));
-  assert.equal(withDefs.length, 1); // all three in one bucket
-  assert.match(out, /only 1 independent component/);
+  assert.equal(withDefs.length, 2); // the chain is now cut across both agents
+  assert.match(out, /cut: \d+ cross-bucket/);
 });

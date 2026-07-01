@@ -12,6 +12,7 @@ import { exportNamespace, namesOf, projectNamespace, renderDef } from "./project
 import { emitModule } from "./backend/emit_ts.ts";
 import { valueToString } from "./core/eval.ts";
 import { initRepo, loadRepo, repoExists, saveRepo } from "./persist.ts";
+import { partition } from "./swarm/partition.ts";
 import type { Hash } from "./core/term.ts";
 
 interface Args {
@@ -51,7 +52,7 @@ const USAGE = `strand — content-addressed substrate for parallel agent authori
   strand fmt <file.strand> [--write]   # pretty-print Strand source
   strand test                  # run all zero-arg Bool definitions as tests
   strand untested              # definitions not reached by any test
-  strand partition --agents N  # split the namespace into N non-contending buckets
+  strand partition --agents N  # min-cut split into N balanced buckets (+ cut cost, hot nodes)
   strand log                   # the full work-plane history (every applied step)
   strand distill               # the clean current namespace, dead steps dropped
   strand require <name> <check...>     # set required checks for a definition
@@ -394,40 +395,23 @@ function main(argv: string[]): number {
       const repo = loadRepo(root);
       const n = Math.max(1, parseInt(opts.agents ?? "2", 10) || 2);
       const valueDefs = [...repo.namespace].filter(([, b]) => repo.store.defOf(b.hash));
-      // union-find over definitions linked by dependencies (independent components never contend)
-      const parent = new Map<string, string>();
-      for (const [, b] of valueDefs) parent.set(b.hash, b.hash);
-      const find = (x: string): string => {
-        let r = x;
-        while (parent.get(r) !== r) r = parent.get(r)!;
-        return r;
-      };
-      const union = (a: string, b: string): void => {
-        const ra = find(a);
-        const rb = find(b);
-        if (ra !== rb) parent.set(ra, rb);
-      };
-      for (const [, b] of valueDefs) {
-        const def = repo.store.defOf(b.hash);
-        if (def) for (const d of depsOf(def.body)) if (parent.has(d)) union(b.hash, d);
-      }
-      const comps = new Map<string, string[]>();
-      for (const [name, b] of valueDefs) {
-        const r = find(b.hash);
-        (comps.get(r) ?? comps.set(r, []).get(r)!).push(name);
-      }
-      // pack components (largest first) into the agent with the least work so far
-      const components = [...comps.values()].sort((a, z) => z.length - a.length);
-      const buckets: string[][] = Array.from({ length: n }, () => []);
-      for (const comp of components) {
-        let mi = 0;
-        for (let i = 1; i < n; i++) if (buckets[i].length < buckets[mi].length) mi = i;
-        buckets[mi].push(...comp);
-      }
-      buckets.forEach((b, i) => console.log(`agent ${i + 1} (${b.length}): ${b.sort().join(", ") || "—"}`));
-      if (components.length < n) {
-        console.log(`note: only ${components.length} independent component(s); more agents than that would contend`);
-      }
+      const present = new Set(valueDefs.map(([, b]) => b.hash));
+      const nodes = valueDefs.map(([name, b]) => ({
+        id: b.hash,
+        label: name,
+        deps: depsOf(repo.store.defOf(b.hash)!.body).filter((d) => present.has(d)),
+      }));
+      // Kernighan–Lin edge-cut partition: splits *inside* a connected component
+      // along its weakest seams, not just at component boundaries.
+      const { buckets, cut, centrality } = partition(nodes, n);
+      const nameOf = new Map(valueDefs.map(([name, b]) => [b.hash, name]));
+      buckets.forEach((bk, i) => {
+        const names = bk.map((id) => nameOf.get(id)!).sort();
+        console.log(`agent ${i + 1} (${names.length}): ${names.join(", ") || "—"}`);
+      });
+      console.log(`cut: ${cut} cross-bucket dependency edge(s)`);
+      const hot = centrality.filter((c) => c.fanIn > 0).slice(0, 3);
+      if (hot.length) console.log(`hot: ${hot.map((c) => `${c.label}(${c.fanIn})`).join(", ")}`);
       return 0;
     }
 
