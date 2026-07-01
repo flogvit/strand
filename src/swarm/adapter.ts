@@ -1,0 +1,101 @@
+import { execFileSync } from "node:child_process";
+import type { Task } from "./queue.ts";
+
+/** The provider-agnostic agent layer. An "agent" is abstract: under it can be
+ *  Claude, Codex, Gemini — whatever the operator picks. Strand does not care who
+ *  authored a definition (it is content-addressed), so a provider is nothing more
+ *  than a command plus a prompt template. Swapping providers never touches the
+ *  worker loop. */
+
+export interface AgentContext {
+  task: Task;
+  /** The current namespace as Strand source, so the agent builds on existing defs. */
+  namespaceSource: string;
+}
+
+export interface AgentResult {
+  /** Strand source to submit through the green-gate (definitions and/or tests). */
+  code: string;
+  /** A human-readable note carried back onto the task. */
+  report: string;
+}
+
+export interface Agent {
+  readonly provider: string;
+  run(ctx: AgentContext): AgentResult;
+}
+
+/** Build the instruction handed to whichever provider runs. Deliberately provider-
+ *  neutral: describe the job, show the existing namespace, demand a single Strand
+ *  code block back. The green-gate — not the prompt — is what guarantees correctness. */
+export function buildPrompt(ctx: AgentContext): string {
+  const { task, namespaceSource } = ctx;
+  const job =
+    task.role === "test"
+      ? `Write Strand test definitions (zero-arg Bool defs) that exercise: ${task.target.join(", ")}.`
+      : `Write the Strand definition(s) for: ${task.target.join(", ")}.`;
+  return [
+    `You are authoring in Strand, a small typed functional language that transpiles to TypeScript.`,
+    `Task: ${task.title}`,
+    `Intent: ${task.intent}`,
+    job,
+    ``,
+    `The current namespace (build on these; reference them by name):`,
+    "```strand",
+    namespaceSource.trim() || "# (empty namespace)",
+    "```",
+    ``,
+    `Reply with exactly one \`\`\`strand code block containing only the new definition(s).`,
+    `No prose outside the code block. It must type-check on its own against the namespace above.`,
+  ].join("\n");
+}
+
+/** Pull the Strand source out of a model reply: the first fenced ```strand block,
+ *  falling back to any fenced block, falling back to the whole reply. */
+export function extractStrand(reply: string): string {
+  const fenced = reply.match(/```(?:strand)?\s*\n([\s\S]*?)```/);
+  return (fenced ? fenced[1] : reply).trim();
+}
+
+/** A provider is a subprocess: a command whose args carry the prompt (via the
+ *  `{prompt}` placeholder) or, if no placeholder is present, receive it on stdin. */
+export interface CliProvider {
+  provider: string;
+  command: string;
+  args: string[];
+}
+
+/** Best-effort presets. Flags are the seam we expect to adjust per environment;
+ *  the interface is what stays fixed. */
+export const PROVIDERS: Record<string, CliProvider> = {
+  claude: { provider: "claude", command: "claude", args: ["-p", "{prompt}"] },
+  codex: { provider: "codex", command: "codex", args: ["exec", "{prompt}"] },
+  gemini: { provider: "gemini", command: "gemini", args: ["-p", "{prompt}"] },
+};
+
+export class CliAgent implements Agent {
+  readonly provider: string;
+  constructor(private readonly spec: CliProvider) {
+    this.provider = spec.provider;
+  }
+
+  run(ctx: AgentContext): AgentResult {
+    const prompt = buildPrompt(ctx);
+    const usesPlaceholder = this.spec.args.some((a) => a.includes("{prompt}"));
+    const args = this.spec.args.map((a) => a.replace("{prompt}", prompt));
+    const reply = execFileSync(this.spec.command, args, {
+      input: usesPlaceholder ? undefined : prompt,
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    return { code: extractStrand(reply), report: `authored by ${this.provider}` };
+  }
+}
+
+/** Resolve a provider name to an agent. Unknown names are an explicit error so a
+ *  typo never silently falls back to the wrong model. */
+export function agentFor(provider: string): Agent {
+  const spec = PROVIDERS[provider];
+  if (!spec) throw new Error(`unknown provider '${provider}' (have: ${Object.keys(PROVIDERS).join(", ")})`);
+  return new CliAgent(spec);
+}

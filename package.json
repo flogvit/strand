@@ -6,6 +6,7 @@
   "scripts": {
     "strand": "tsx src/cli.ts",
     "strand-ts": "tsx src/ts/cli.ts",
+    "strand-swarm": "tsx src/swarm/cli.ts",
     "lsp": "tsx src/lsp.ts",
     "demo": "bash examples/swarm.sh",
     "demo:ts": "bash examples/ts-swarm.sh",
