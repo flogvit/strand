@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { agentFor } from "./adapter.ts";
-import { FileQueue } from "./queue.ts";
+import { FileQueue, type Queue } from "./queue.ts";
+import { GhQueue } from "./ghqueue.ts";
 import { seed } from "./plan.ts";
 import { work } from "./worker.ts";
 
@@ -31,26 +32,32 @@ function parseArgs(argv: string[]): Args {
 
 const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestration
 
-  strand-swarm plan [--queue <dir>]                 seed the Sudoku decomposition as tasks
-  strand-swarm work --as <id> --provider <name> [--root <dir>] [--queue <dir>]
-                                                    run a worker until the queue drains
-  strand-swarm status [--queue <dir>]               show the task board
+  strand-swarm plan [--queue <dir> | --gh <owner/repo>]
+                                                    seed the Sudoku decomposition as tasks
+  strand-swarm work --as <id> --provider <name> [--root <dir>] [--queue <dir> | --gh <owner/repo>]
+                    [--peers <url,url>]             run a worker until the queue drains,
+                                                    gossiping with the given peers
+  strand-swarm status [--queue <dir> | --gh <owner/repo>]
+                                                    show the task board
 
   providers: claude | codex | gemini
+  queues:    a local dir (default) or GitHub issues via --gh — the shared board
+             agents on any machine pull from and a human can add to mid-run
   defaults:  --root = $STRAND_ROOT or cwd;  --queue = <root>/.strand-swarm
 `;
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   const { positionals, opts } = parseArgs(argv);
   const cmd = positionals[0];
   const root = opts.root ?? process.env.STRAND_ROOT ?? process.cwd();
   const queueDir = opts.queue ?? join(root, ".strand-swarm");
-  const queue = new FileQueue(queueDir);
+  const queue: Queue = opts.gh ? new GhQueue({ repo: opts.gh }) : new FileQueue(queueDir);
+  const queueName = opts.gh ? `github:${opts.gh}` : queueDir;
 
   switch (cmd) {
     case "plan": {
       const tasks = seed(queue);
-      console.log(`seeded ${tasks.length} tasks into ${queueDir}`);
+      console.log(`seeded ${tasks.length} tasks into ${queueName}`);
       return 0;
     }
 
@@ -61,7 +68,8 @@ function main(argv: string[]): number {
         console.error("work requires --as <id> and --provider <name>");
         return 2;
       }
-      const summary = work(queue, agentFor(provider), { root, workerId });
+      const peers = opts.peers ? opts.peers.split(",").map((p) => p.trim()).filter(Boolean) : [];
+      const summary = await work(queue, agentFor(provider), { root, workerId, peers });
       console.log(`${workerId}: ${summary.done.length} done, ${summary.parked.length} parked`);
       return 0;
     }
@@ -83,4 +91,4 @@ function main(argv: string[]): number {
   }
 }
 
-process.exit(main(process.argv.slice(2)));
+process.exit(await main(process.argv.slice(2)));

@@ -96,7 +96,7 @@ class ScriptedAgent implements Agent {
   }
 }
 
-test("a swarm of workers autonomously builds the Sudoku generator green", { timeout: 480_000 }, () => {
+test("a swarm of workers autonomously builds the Sudoku generator green", { timeout: 480_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "strand-swarm-sudoku-"));
   strand(root, ["init"]);
   strand(root, ["submit", "--as", "prelude", "--intent", "prelude", "--file", join(process.cwd(), "lib", "prelude.strand")]);
@@ -111,7 +111,7 @@ test("a swarm of workers autonomously builds the Sudoku generator green", { time
   const agent = new ScriptedAgent();
   const workers = Array.from({ length: 12 }, (_, i) => `agent-${i + 1}`);
   for (let round = 0; round < 60 && queue.list().some((t) => t.state !== "done"); round++) {
-    for (const w of workers) work(queue, agent, { root, workerId: w, maxIdlePolls: 1, pollMs: 0 });
+    for (const w of workers) await work(queue, agent, { root, workerId: w, maxIdlePolls: 1, pollMs: 0 });
   }
 
   assert.ok(queue.list().every((t) => t.state === "done"), "every task completed");

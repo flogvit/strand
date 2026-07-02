@@ -68,6 +68,39 @@ function membersUnder(node: Node | undefined, out: Set<Hash>): void {
   if (node.children) for (const c of node.children.values()) membersUnder(c, out);
 }
 
+/** The wire format of a node: children become a plain object. */
+export interface NodeJSON {
+  digest: string;
+  children?: Record<string, NodeJSON>;
+  members?: Hash[];
+}
+
+function nodeToJSON(node: Node): NodeJSON {
+  if (node.members) return { digest: node.digest, members: node.members };
+  return {
+    digest: node.digest,
+    children: Object.fromEntries([...node.children!].map(([k, c]) => [k, nodeToJSON(c)])),
+  };
+}
+
+function nodeFromJSON(json: NodeJSON): Node {
+  if (json.members) return { digest: json.digest, members: json.members };
+  return {
+    digest: json.digest,
+    children: new Map(Object.entries(json.children ?? {}).map(([k, c]) => [k, nodeFromJSON(c)])),
+  };
+}
+
+/** Serialize an index so a peer can ship it whole — reconciliation then runs
+ *  locally on the puller, and only the diff's objects cross the wire after. */
+export function indexToJSON(index: MerkleIndex): NodeJSON {
+  return nodeToJSON(index.root);
+}
+
+export function indexFromJSON(json: NodeJSON): MerkleIndex {
+  return { root: nodeFromJSON(json) };
+}
+
 export interface Reconciliation {
   /** Hashes `b` holds that `a` is missing. */
   missingFromA: Hash[];

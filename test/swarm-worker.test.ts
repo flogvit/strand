@@ -29,7 +29,7 @@ class FakeAgent implements Agent {
   }
 }
 
-test("a worker drives a dependency graph green through the green-gate", () => {
+test("a worker drives a dependency graph green through the green-gate", async () => {
   const root = mkdtempSync(join(tmpdir(), "strand-swarm-e2e-"));
   strand(root, ["init"]);
 
@@ -42,7 +42,7 @@ test("a worker drives a dependency graph green through the green-gate", () => {
     double: "def double (n: Int) -> Int = add n n",
   });
 
-  const summary = work(queue, agent, { root, workerId: "w1", maxIdlePolls: 2, pollMs: 10 });
+  const summary = await work(queue, agent, { root, workerId: "w1", maxIdlePolls: 2, pollMs: 10 });
 
   assert.equal(summary.done.length, 2, "both tasks completed");
   assert.equal(summary.parked.length, 0, "nothing parked");

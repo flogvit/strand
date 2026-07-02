@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { gossipOnce } from "../distributed/transport.ts";
 import type { Agent } from "./adapter.ts";
 import type { Queue, Task } from "./queue.ts";
 
@@ -19,6 +21,11 @@ export interface WorkerOptions {
   maxIdlePolls?: number;
   /** Milliseconds to wait between polls. */
   pollMs?: number;
+  /** Known peers (base URLs) to gossip with before each poll — the sync plane
+   *  under the loop, so work on other machines flows in as it lands. */
+  peers?: string[];
+  /** Attempts on the same task before this worker parks it for someone else. */
+  maxAttempts?: number;
 }
 
 export interface WorkSummary {
@@ -33,12 +40,6 @@ function strand(root: string, args: string[]): string {
     encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,
   });
-}
-
-/** Blocking sleep in synchronous code (matches the codebase's sync idiom). */
-function sleep(ms: number): void {
-  if (ms <= 0) return;
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /** The definitions a chunk of Strand source declares (a task's target is an
@@ -91,19 +92,26 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task): {
   return { state: "done", comment: result.report };
 }
 
-export function work(queue: Queue, agent: Agent, opts: WorkerOptions): WorkSummary {
-  const { root, workerId, maxIdlePolls = 3, pollMs = 100 } = opts;
+export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Promise<WorkSummary> {
+  const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3 } = opts;
   const summary: WorkSummary = { workerId, done: [], parked: [] };
+  const attempts = new Map<string, number>();
   let idle = 0;
 
   while (idle < maxIdlePolls) {
+    // pull the sync plane first, so definitions landed on other machines are
+    // in the local store before the agent (and the green-gate) run
+    if (peers.length > 0) await gossipOnce(root, peers);
+
     const task = queue.claim(workerId);
     if (!task) {
       idle++;
-      sleep(pollMs);
+      if (pollMs > 0) await delay(pollMs);
       continue;
     }
     idle = 0;
+    const tries = (attempts.get(task.id) ?? 0) + 1;
+    attempts.set(task.id, tries);
 
     let outcome: { state: "done" | "ready"; comment: string };
     try {
@@ -116,7 +124,10 @@ export function work(queue: Queue, agent: Agent, opts: WorkerOptions): WorkSumma
       queue.report(task.id, { state: "done", comment: outcome.comment });
       summary.done.push(task.id);
     } else {
-      queue.report(task.id, { state: "ready", unassign: true, comment: outcome.comment });
+      // a task this worker keeps failing is parked (not ready) after the
+      // attempt budget, so the loop can never spin forever on one bad task
+      const state = tries >= maxAttempts ? "parked" : "ready";
+      queue.report(task.id, { state, unassign: true, comment: outcome.comment });
       summary.parked.push(task.id);
     }
   }
