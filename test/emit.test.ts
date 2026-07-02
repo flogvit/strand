@@ -32,3 +32,23 @@ test("maps == to === and if to a ternary", () => {
   assert.match(ts, /a === b/);
   assert.match(ts, /\? 1 : 0/);
 });
+
+// #34: importing a projection must not execute it.
+test("zero-arg defs emit as memoized thunks: import runs nothing, first call pays, later calls reuse", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const { ns, store } = build(
+    'foreign loud -> Int = "(() => { console.log(\\"evaluated\\"); return 42; })()"\n' +
+      "def twice -> Int = loud + loud",
+  );
+  const ts = emitModule(ns, store);
+  const dir = mkdtempSync(join(tmpdir(), "strand-lazy-"));
+  const file = join(dir, "m.ts");
+  // Import alone must print nothing; forcing twice() evaluates loud exactly once.
+  writeFileSync(file, ts + '\nconsole.log("imported");\nconsole.log(String(twice()));\n');
+  const out = execFileSync("npx", ["tsx", file], { encoding: "utf8" }).trim().split("\n");
+  assert.deepEqual(out, ["imported", "evaluated", "84"]);
+});

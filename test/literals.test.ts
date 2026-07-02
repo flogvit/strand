@@ -28,14 +28,14 @@ test("negative integer literals (interpreter and transpiled)", () => {
   const { store, ns, names, registry } = build("def neg -> Int = -5\ndef sub (n: Int) -> Int = -n");
   assert.equal(valueToString(evalQuery("neg", store, names, registry)), "-5");
   assert.equal(valueToString(evalQuery("sub 3", store, names, registry)), "-3");
-  assert.equal(runT(ns, store, "neg"), "-5");
+  assert.equal(runT(ns, store, "neg()"), "-5");
   assert.equal(runT(ns, store, "sub(3)"), "-3");
 });
 
 test("string escape sequences (interpreter and transpiled)", () => {
   const { store, ns, names, registry } = build('def s -> Text = "a\\tb"');
   assert.equal(valueToString(evalQuery("s", store, names, registry)), '"a\\tb"');
-  assert.equal(runT(ns, store, "s"), "a\tb");
+  assert.equal(runT(ns, store, "s()"), "a\tb");
 });
 
 test("escaped quotes and backslashes", () => {

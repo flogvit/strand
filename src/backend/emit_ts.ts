@@ -46,8 +46,16 @@ function tsName(hash: Hash, nameOf: Map<Hash, string>): string {
   return nameOf.get(hash) ?? "_h" + hash.replace(/[^A-Za-z0-9]/g, "");
 }
 
-function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string, groupNames: string[] = []): string {
-  const e = (s: CoreTerm): string => emitTerm(s, nameOf, selfName, groupNames);
+/** Zero-arg definitions are emitted as memoized thunks (see emitDef), so a
+ *  reference to one is a call. */
+type EmitCtx = {
+  lazy: Set<Hash>;
+  selfLazy: boolean;
+  group: Hash[];
+};
+
+function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string, ctx: EmitCtx): string {
+  const e = (s: CoreTerm): string => emitTerm(s, nameOf, selfName, ctx);
   switch (t.tag) {
     case "IntLit":
       return String(t.value);
@@ -56,9 +64,12 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string, grou
     case "TextLit":
       return JSON.stringify(t.value);
     case "Self":
-      return selfName;
-    case "Cyc":
-      return groupNames[t.index];
+      return ctx.selfLazy ? `${selfName}()` : selfName;
+    case "Cyc": {
+      const h = ctx.group[t.index];
+      const n = tsName(h, nameOf);
+      return ctx.lazy.has(h) ? `${n}()` : n;
+    }
     case "Foreign":
       return `(${t.code})`;
     case "Field":
@@ -67,8 +78,10 @@ function emitTerm(t: CoreTerm, nameOf: Map<Hash, string>, selfName: string, grou
       return PRIM_TS[t.name];
     case "Var":
       return t.name;
-    case "Ref":
-      return tsName(t.hash, nameOf);
+    case "Ref": {
+      const n = tsName(t.hash, nameOf);
+      return ctx.lazy.has(t.hash) ? `${n}()` : n;
+    }
     case "Ctor":
       return t.ctor;
     case "App":
@@ -120,11 +133,20 @@ function emitData(decl: DataDecl): string {
   return lines.join("\n");
 }
 
-function emitDef(name: string, hash: Hash, store: Store, nameOf: Map<Hash, string>): string {
+function emitDef(name: string, hash: Hash, store: Store, nameOf: Map<Hash, string>, lazy: Set<Hash>): string {
   const def = store.defOf(hash)!;
-  const groupNames = def.group ? def.group.map((h) => tsName(h, nameOf)) : [];
-  const body = emitTerm(def.body, nameOf, name, groupNames);
-  if (def.params.length === 0) return `export const ${name}: ${tsType(def.ret)} = ${body};`;
+  const ctx: EmitCtx = { lazy, selfLazy: def.params.length === 0, group: def.group ?? [] };
+  const body = emitTerm(def.body, nameOf, name, ctx);
+  // Zero-arg defs are memoized thunks: importing the module computes nothing,
+  // the first call pays for the value, later calls return it (#34).
+  if (def.params.length === 0) {
+    const ret = tsType(def.ret);
+    return (
+      `export const ${name}: () => ${ret} = (() => { ` +
+      `let has = false; let v: ${ret}; ` +
+      `return () => { if (!has) { has = true; v = ${body}; } return v; }; })();`
+    );
+  }
   const ps = def.params;
   let s = `(${ps[ps.length - 1].name}: ${tsType(ps[ps.length - 1].ty)}): ${tsType(def.ret)} => ${body}`;
   for (let i = ps.length - 2; i >= 0; i--) s = `(${ps[i].name}: ${tsType(ps[i].ty)}) => ${s}`;
@@ -159,7 +181,10 @@ export function emitModule(namespace: Namespace, store: Store): string {
   };
   for (const [, b] of namespace) if (store.defOf(b.hash)) visit(b.hash);
 
-  const defLines = order.map((h) => emitDef(tsName(h, nameOf), h, store, nameOf));
+  const lazy = new Set<Hash>();
+  for (const h of order) if (store.defOf(h)!.params.length === 0) lazy.add(h);
+
+  const defLines = order.map((h) => emitDef(tsName(h, nameOf), h, store, nameOf, lazy));
   for (const [name, b] of namespace) {
     if (!store.defOf(b.hash)) continue;
     const canonical = tsName(b.hash, nameOf);

@@ -244,7 +244,9 @@ function main(argv: string[]): number {
       if (!name) throw new StrandError("run needs a <name>");
       const repo = loadRepo(root);
       if (!repo.namespace.has(name)) throw new StrandError(`no such name '${name}'`);
-      const ts = emitModule(repo.namespace, repo.store) + `\nconsole.log(String(${name}));\n`;
+      // Zero-arg defs emit as memoized thunks (#34): force the value to print it.
+      const isThunk = repo.store.defOf(repo.namespace.get(name)!.hash)?.params.length === 0;
+      const ts = emitModule(repo.namespace, repo.store) + `\nconsole.log(String(${name}${isThunk ? "()" : ""}));\n`;
       const file = join(root, ".strand", "_run.ts");
       writeFileSync(file, ts);
       const out = execFileSync("npx", ["tsx", file], { encoding: "utf8" });

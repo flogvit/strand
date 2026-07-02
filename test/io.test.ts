@@ -47,7 +47,7 @@ test("IO transpiles to TypeScript and runs", () => {
   }
   const dir = mkdtempSync(join(tmpdir(), "strand-io-ts-"));
   const file = join(dir, "m.ts");
-  writeFileSync(file, emitModule(ns, store) + "\nhello();\n");
+  writeFileSync(file, emitModule(ns, store) + "\nhello()();\n");
   assert.equal(execFileSync("npx", ["tsx", file], { encoding: "utf8" }).trim(), "hi");
 });
 

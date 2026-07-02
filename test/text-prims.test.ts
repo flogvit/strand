@@ -37,28 +37,28 @@ function both(src: string, expr: string, tsExpr: string, expected: string): void
 }
 
 test("textLength counts characters", () => {
-  both(`def n -> Int = textLength "heia"`, "n", "n", "4");
-  both(`def z -> Int = textLength ""`, "z", "z", "0");
+  both(`def n -> Int = textLength "heia"`, "n", "n()", "4");
+  both(`def z -> Int = textLength ""`, "z", "z()", "0");
 });
 
 test("charAt is total: a single character in range, empty out of range", () => {
-  both(`def a -> Text = charAt 0 "abc"`, "a", "a", '"a"');
-  both(`def c -> Text = charAt 2 "abc"`, "c", "c", '"c"');
-  both(`def past -> Text = charAt 3 "abc"`, "past", "past", '""');
-  both(`def neg -> Text = charAt (0 - 1) "abc"`, "neg", "neg", '""');
+  both(`def a -> Text = charAt 0 "abc"`, "a", "a()", '"a"');
+  both(`def c -> Text = charAt 2 "abc"`, "c", "c()", '"c"');
+  both(`def past -> Text = charAt 3 "abc"`, "past", "past()", '""');
+  both(`def neg -> Text = charAt (0 - 1) "abc"`, "neg", "neg()", '""');
 });
 
 test("substring takes [start, end) with clamping, never crashes", () => {
-  both(`def mid -> Text = substring 1 3 "abcd"`, "mid", "mid", '"bc"');
-  both(`def all -> Text = substring 0 99 "ab"`, "all", "all", '"ab"');
-  both(`def rev -> Text = substring 3 1 "abcd"`, "rev", "rev", '""');
-  both(`def negs -> Text = substring (0 - 2) 1 "abcd"`, "negs", "negs", '"a"');
+  both(`def mid -> Text = substring 1 3 "abcd"`, "mid", "mid()", '"bc"');
+  both(`def all -> Text = substring 0 99 "ab"`, "all", "all()", '"ab"');
+  both(`def rev -> Text = substring 3 1 "abcd"`, "rev", "rev()", '""');
+  both(`def negs -> Text = substring (0 - 2) 1 "abcd"`, "negs", "negs()", '"a"');
 });
 
 test("intToText renders base-10 integers", () => {
-  both(`def s -> Text = intToText 42`, "s", "s", '"42"');
-  both(`def m -> Text = intToText (0 - 7)`, "m", "m", '"-7"');
-  both(`def z -> Text = intToText 0`, "z", "z", '"0"');
+  both(`def s -> Text = intToText 42`, "s", "s()", '"42"');
+  both(`def m -> Text = intToText (0 - 7)`, "m", "m()", '"-7"');
+  both(`def z -> Text = intToText 0`, "z", "z()", '"0"');
 });
 
 test("the primitives compose in ordinary definitions through the gate", () => {
