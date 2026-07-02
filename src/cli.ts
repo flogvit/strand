@@ -6,7 +6,7 @@ import { compileProgram, dataDeclsOf, evalQuery, registryOf, valueNamesOf } from
 import { parseProgram } from "./syntax/parser.ts";
 import { printProgram } from "./syntax/print.ts";
 import { depsOf } from "./core/term.ts";
-import { merge, resolveConflict } from "./merge.ts";
+import { mergeRepo, resolveRepo } from "./repo.ts";
 import { typecheckNamespace } from "./core/check.ts";
 import { exportNamespace, namesOf, projectNamespace, renderDef } from "./project.ts";
 import { emitModule } from "./backend/emit_ts.ts";
@@ -112,14 +112,7 @@ function main(argv: string[]): number {
     case "merge": {
       requireRepo(root);
       const repo = loadRepo(root);
-      const result = merge(repo.namespace, repo.store, repo.pending);
-      repo.namespace = result.namespace;
-      repo.conflicts.push(...result.conflicts);
-      repo.pending = [];
-      for (const name of result.applied) {
-        const ab = repo.namespace.get(name)!;
-        repo.history.push({ name, hash: ab.hash, by: ab.by, intent: ab.intent });
-      }
+      const result = mergeRepo(repo);
       saveRepo(root, repo);
       console.log(`applied  : ${result.applied.sort().join(", ") || "none"}`);
       console.log(`conflicts: ${result.conflicts.map((c) => c.name).join(", ") || "none"}`);
@@ -462,10 +455,7 @@ function main(argv: string[]): number {
       const hash = positionals[2];
       if (!name || !hash) throw new StrandError("resolve needs <name> <hash>");
       const repo = loadRepo(root);
-      const conflict = repo.conflicts.find((c) => c.name === name);
-      if (!conflict) throw new StrandError(`no parked conflict for '${name}'`);
-      repo.namespace = resolveConflict(repo.namespace, conflict, hash);
-      repo.conflicts = repo.conflicts.filter((c) => c !== conflict);
+      resolveRepo(repo, name, hash, opts.as ?? "human");
       saveRepo(root, repo);
       console.log(`resolved '${name}' -> ${hash}`);
       return 0;

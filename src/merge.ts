@@ -1,50 +1,39 @@
 import { Store } from "./core/store.ts";
 import type { Hash } from "./core/term.ts";
+import { emptyNamespace, observe, view } from "./distributed/crdt.ts";
 import type { Conflict, MergeResult, Namespace, PendingTx } from "./model.ts";
 
-/** The heart of Strand. Reconcile a batch of concurrent transactions against a
- *  base namespace. Content already lives in the (append-only, content-addressed)
- *  store, so the only question is which name points where.
+/** Thin adapter over the CRDT — the one merge algebra (src/distributed/crdt.ts).
+ *  A batch of concurrent transactions is a set of observations; the CRDT view
+ *  decides contention, so this and the distributed join can never disagree.
  *
- *  Invariants:
+ *  Invariants (unchanged, now inherited from the view):
  *   - names nobody contends on are applied untouched (independent work merges).
  *   - the ONLY conflict is two agents binding the SAME name to DIFFERENT hashes.
  *   - convergent edits (same name, same hash) are NOT a conflict.
  *   - a bind to unresolvable content is rejected, not merged (green guard).
  *   - conflicts are returned, not thrown: the rest of the merge still stands. */
 export function merge(base: Namespace, store: Store, txs: PendingTx[]): MergeResult {
-  const byName = new Map<string, { by: string; hash: Hash; intent: string }[]>();
+  let round = emptyNamespace();
+  const rejected: MergeResult["rejected"] = [];
   for (const tx of txs) {
     for (const b of tx.binds) {
-      const list = byName.get(b.name) ?? [];
-      list.push({ by: tx.by, hash: b.hash, intent: tx.intent });
-      byName.set(b.name, list);
+      if (!store.isResolvable(b.hash)) {
+        rejected.push({ name: b.name, by: tx.by, hash: b.hash, reason: "unresolvable content" });
+        continue;
+      }
+      round = observe(round, b.name, { hash: b.hash, by: tx.by, intent: tx.intent });
     }
   }
 
+  const v = view(round);
   const namespace: Namespace = new Map(base);
   const applied: string[] = [];
-  const conflicts: Conflict[] = [];
-  const rejected: MergeResult["rejected"] = [];
-
-  for (const [name, contenders] of byName) {
-    const valid = contenders.filter((c) => {
-      const ok = store.isResolvable(c.hash);
-      if (!ok) rejected.push({ name, by: c.by, hash: c.hash, reason: "unresolvable content" });
-      return ok;
-    });
-    if (valid.length === 0) continue;
-
-    const distinct = [...new Set(valid.map((c) => c.hash))];
-    if (distinct.length === 1) {
-      const winner = valid[0];
-      namespace.set(name, { hash: winner.hash, intent: winner.intent, by: winner.by });
-      applied.push(name);
-    } else {
-      conflicts.push({ name, base: base.get(name)?.hash ?? null, contenders: valid });
-    }
+  for (const [name, b] of v.namespace) {
+    namespace.set(name, b);
+    applied.push(name);
   }
-
+  const conflicts = v.conflicts.map((c) => ({ ...c, base: base.get(c.name)?.hash ?? null }));
   return { namespace, applied, conflicts, rejected };
 }
 

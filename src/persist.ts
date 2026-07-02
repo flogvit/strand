@@ -95,11 +95,20 @@ export function loadRepo(root: string): RepoState {
   const attestations = readJSON<Record<Hash, string[]>>(p.attestations, {});
   const history = readJSON<HistoryEntry[]>(p.history, []);
   // A repo written before the distributed plane existed has no crdt.json: lift
-  // its resolved namespace into CRDT state (one observation per binding) so it
-  // can join the gossip like any other peer.
-  const crdtState = existsSync(p.crdt)
-    ? crdt.fromJSON(readJSON<Record<string, NameState>>(p.crdt, {}))
-    : crdt.fromNamespace(namespace);
+  // its resolved namespace (one observation per binding) and its parked
+  // conflicts (one observation per contender) into CRDT state so it can join
+  // the gossip like any other peer.
+  let crdtState: CrdtNamespace;
+  if (existsSync(p.crdt)) {
+    crdtState = crdt.fromJSON(readJSON<Record<string, NameState>>(p.crdt, {}));
+  } else {
+    crdtState = crdt.fromNamespace(namespace);
+    for (const c of conflicts) {
+      for (const k of c.contenders) {
+        crdtState = crdt.observe(crdtState, c.name, { hash: k.hash, by: k.by, intent: k.intent });
+      }
+    }
+  }
   const hintState = hints.fromJSON(readJSON<Record<string, Intent>>(p.hints, {}));
   const memoryState = memory.fromJSON(readJSON<Record<string, Note>>(p.memory, {}));
   return { store, namespace, pending, conflicts, attestations, history, crdt: crdtState, hints: hintState, memory: memoryState };
