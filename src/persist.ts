@@ -6,9 +6,11 @@ import type { Binding, Conflict, Namespace, PendingTx } from "./model.ts";
 import * as crdt from "./distributed/crdt.ts";
 import * as hints from "./distributed/hints.ts";
 import * as memory from "./distributed/memory.ts";
+import * as presence from "./distributed/presence.ts";
 import type { CrdtNamespace, NameState } from "./distributed/crdt.ts";
 import type { Hints, Intent } from "./distributed/hints.ts";
 import type { Memory, Note } from "./distributed/memory.ts";
+import type { Beat, PresenceMap } from "./distributed/presence.ts";
 
 const DIR = ".strand";
 
@@ -37,6 +39,8 @@ export interface RepoState {
   hints: Hints;
   /** Swarm decision memory: conventions, assumptions, rejected alternatives. */
   memory: Memory;
+  /** Worker heartbeats (#43) — render-only CRDT state for the dashboard. */
+  presence: PresenceMap;
 }
 
 function paths(root: string) {
@@ -52,6 +56,7 @@ function paths(root: string) {
     crdt: join(d, "crdt.json"),
     hints: join(d, "hints.json"),
     memory: join(d, "memory.json"),
+    presence: join(d, "presence.json"),
   };
 }
 
@@ -80,6 +85,7 @@ export function initRepo(root: string): RepoState {
     crdt: crdt.emptyNamespace(),
     hints: hints.emptyHints(),
     memory: memory.emptyMemory(),
+    presence: presence.emptyPresence(),
   };
   saveRepo(root, state);
   return state;
@@ -111,7 +117,8 @@ export function loadRepo(root: string): RepoState {
   }
   const hintState = hints.fromJSON(readJSON<Record<string, Intent>>(p.hints, {}));
   const memoryState = memory.fromJSON(readJSON<Record<string, Note>>(p.memory, {}));
-  return { store, namespace, pending, conflicts, attestations, history, crdt: crdtState, hints: hintState, memory: memoryState };
+  const presenceState = presence.fromJSON(readJSON<Record<string, Beat>>(p.presence, {}));
+  return { store, namespace, pending, conflicts, attestations, history, crdt: crdtState, hints: hintState, memory: memoryState, presence: presenceState };
 }
 
 export function saveRepo(root: string, state: RepoState): void {
@@ -125,4 +132,5 @@ export function saveRepo(root: string, state: RepoState): void {
   writeJSON(p.crdt, crdt.toJSON(state.crdt));
   writeJSON(p.hints, hints.toJSON(state.hints));
   writeJSON(p.memory, memory.toJSON(state.memory));
+  writeJSON(p.presence, presence.toJSON(state.presence));
 }

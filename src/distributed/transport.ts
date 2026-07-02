@@ -7,6 +7,7 @@ import { deriveView } from "../repo.ts";
 import { fromJSON as crdtFromJSON, join as joinCrdt, toJSON as crdtToJSON } from "./crdt.ts";
 import * as hints from "./hints.ts";
 import * as memory from "./memory.ts";
+import * as presence from "./presence.ts";
 import { buildIndex, indexFromJSON, indexToJSON, reconcile, type NodeJSON } from "./merkle.ts";
 
 /** The transport under the sync plane: plain HTTP pull between known peers.
@@ -21,6 +22,7 @@ interface WireState {
   ns: ReturnType<typeof crdtToJSON>;
   hints: Record<string, hints.Intent>;
   memory: Record<string, memory.Note>;
+  presence?: Record<string, presence.Beat>;
 }
 
 function json(res: import("node:http").ServerResponse, value: unknown): void {
@@ -89,6 +91,7 @@ export function servePeer(root: string, port: number, opts: ServeOptions = {}): 
           ns: crdtToJSON(repo.crdt),
           hints: hints.toJSON(repo.hints),
           memory: memory.toJSON(repo.memory),
+          presence: presence.toJSON(repo.presence),
         } satisfies WireState);
       } else {
         res.writeHead(404);
@@ -153,6 +156,7 @@ export async function gossipOnce(root: string, peers: string[], opts: GossipOpti
     repo.crdt = joinCrdt(repo.crdt, crdtFromJSON(state.ns));
     repo.hints = hints.join(repo.hints, hints.fromJSON(state.hints));
     repo.memory = memory.join(repo.memory, memory.fromJSON(state.memory));
+    if (state.presence) repo.presence = presence.join(repo.presence, presence.fromJSON(state.presence));
     deriveView(repo);
     saveRepo(root, repo);
     peersReached++;

@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { depsOf } from "../core/term.ts";
 import { announce, shouldAvoid, shouldConsult } from "../distributed/hints.ts";
 import { forTarget, record, type Note } from "../distributed/memory.ts";
+import { beat } from "../distributed/presence.ts";
 import { gossipOnce } from "../distributed/transport.ts";
 import { loadRepo, saveRepo, type RepoState } from "../persist.ts";
 import { ProviderError, type Agent } from "./adapter.ts";
@@ -105,6 +106,7 @@ function fanIn(repo: RepoState, name: string): number {
 const logicalNow = (repo: RepoState): number => repo.history.length;
 
 const HINT_TTL = 10;
+const PRESENCE_TTL = 10;
 
 function landed(root: string, names: string[]): boolean {
   return names.every((name) => {
@@ -206,6 +208,23 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
   return { state: "done", comment: result.report, assumptions };
 }
 
+/** #43: refresh this worker's presence — one more join on the CRDT plane the
+ *  loop already gossips. Render-only: nothing ever reads it to decide. */
+function heartbeat(root: string, workerId: string, provider: string, currentTask: string | null, summary: WorkSummary): void {
+  const repo = loadRepo(root);
+  const now = logicalNow(repo);
+  repo.presence = beat(repo.presence, {
+    workerId,
+    provider,
+    currentTask,
+    seq: now,
+    expiresAt: now + PRESENCE_TTL,
+    done: summary.done.length,
+    parked: summary.parked.length,
+  });
+  saveRepo(root, repo);
+}
+
 export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Promise<WorkSummary> {
   const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3, backoffMs = 1000, token } = opts;
   const summary: WorkSummary = { workerId, done: [], parked: [], provider: { timeouts: 0, transient: 0, permanent: 0 } };
@@ -221,11 +240,13 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
 
     const task = queue.claim(workerId);
     if (!task) {
+      heartbeat(root, workerId, agent.provider, null, summary);
       idle++;
       if (pollMs > 0) await delay(pollMs);
       continue;
     }
     idle = 0;
+    heartbeat(root, workerId, agent.provider, task.id, summary);
     const tries = (attempts.get(task.id) ?? 0) + 1;
     attempts.set(task.id, tries);
 
@@ -301,12 +322,14 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
       }
       queue.report(task.id, { state: "done", comment: outcome.comment });
       summary.done.push(task.id);
+      heartbeat(root, workerId, agent.provider, null, summary);
     } else {
       // a task this worker keeps failing is parked (not ready) after the
       // attempt budget, so the loop can never spin forever on one bad task
       const state = tries >= maxAttempts ? "parked" : "ready";
       queue.report(task.id, { state, unassign: true, comment: outcome.comment });
       summary.parked.push(task.id);
+      heartbeat(root, workerId, agent.provider, null, summary);
     }
   }
 
