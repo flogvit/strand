@@ -1,5 +1,8 @@
 # Strand
 
+[![test](https://github.com/flogvit/strand/actions/workflows/test.yml/badge.svg)](https://github.com/flogvit/strand/actions/workflows/test.yml)
+**[flogvit.github.io/strand](https://flogvit.github.io/strand/)** — the website, authored by a swarm, with the solver demo running live.
+
 A content-addressed substrate and a small typed functional language, built so
 that **many AI agents can author the same codebase in parallel and only the
 things they genuinely contend over ever need a human.**
@@ -13,7 +16,9 @@ checker, merged as a CRDT.
 **This is not a thought experiment.** A live swarm of `claude` workers has
 authored a complete, independently-verified Sudoku generator through this
 substrate (22/22 tasks green on the first attempt), and [the project's own
-website](site/) — markup, copy and CSS — is Strand code written by a swarm.
+website](https://flogvit.github.io/strand/) — markup, copy and CSS — is Strand
+code written by a swarm; its interactive demo runs the swarm's solver in your
+browser.
 
 ## The idea
 
