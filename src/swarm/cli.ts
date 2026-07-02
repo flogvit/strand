@@ -41,6 +41,10 @@ const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestratio
                                                     run a worker until the queue drains
                                                     (exits after n empty polls, ms apart),
                                                     gossiping with the given peers
+  strand-swarm dashboard [--port <n>] [--root <dir>] [--peers <url,url>] [--token <secret>]
+                         [--queue <dir> | --gh <owner/repo>]
+                                                    read-only observer: joins the gossip and
+                                                    serves the web view (default port 4200)
   strand-swarm serve --port <n> [--root <dir>] [--host <ip>] [--token <secret>]
                                                     serve this repo to pulling peers
                                                     (token defaults to $STRAND_SYNC_TOKEN;
@@ -145,6 +149,23 @@ async function main(argv: string[]): Promise<number> {
           (untested.length - opened > 0 ? ` (${untested.length - opened} already queued)` : "") +
           (opts.require ? ", each now requires 'tests'" : ""),
       );
+      return 0;
+    }
+
+    case "dashboard": {
+      const { startDashboard } = await import("./dashboard.ts");
+      const peers = opts.peers ? opts.peers.split(",").map((p) => p.trim()).filter(Boolean) : [];
+      const { server } = await startDashboard({
+        root,
+        port: Number(opts.port ?? 4200),
+        queue,
+        peers,
+        token: opts.token,
+        host: opts.host,
+      });
+      const addr = server.address() as { address: string; port: number };
+      console.log(`dashboard on http://${addr.address}:${addr.port} — observing ${queueName}${peers.length ? `, gossiping with ${peers.join(", ")}` : ""}`);
+      await new Promise(() => {}); // observe until killed
       return 0;
     }
 

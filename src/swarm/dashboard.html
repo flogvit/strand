@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>strand swarm</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #d1d5db; --dim: #8b93a3;
+    --green: #4ade80; --amber: #fbbf24; --red: #f87171; --blue: #60a5fa; --violet: #c084fc;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--mono); }
+  header { display: flex; align-items: baseline; gap: 1rem; padding: .8rem 1.2rem; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 1rem; margin: 0; color: var(--green); font-weight: 600; }
+  header .meta { color: var(--dim); font-size: .8rem; margin-left: auto; }
+  nav button { background: none; border: 1px solid var(--line); color: var(--dim); font: inherit; padding: .25rem .8rem; cursor: pointer; border-radius: 4px; }
+  nav button.on { color: var(--text); border-color: var(--green); }
+  main { padding: 1.2rem; max-width: 1400px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .8rem; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .8rem 1rem; }
+  .card h3 { margin: 0 0 .3rem; font-size: .95rem; }
+  .card .dim, .dim { color: var(--dim); font-size: .8rem; }
+  .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; margin-right: .4em; }
+  .alive { background: var(--green); } .gone { background: var(--red); } .finished { background: var(--blue); }
+  .lane { display: flex; gap: 2.5rem; align-items: flex-start; overflow-x: auto; position: relative; padding: .5rem 0 1rem; }
+  .col { display: flex; flex-direction: column; gap: .7rem; min-width: 200px; }
+  .col > .dim { text-align: center; }
+  .task { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--dim); border-radius: 4px; padding: .4rem .7rem; font-size: .82rem; }
+  .task.ready { border-left-color: var(--blue); } .task.done { border-left-color: var(--green); }
+  .task.parked { border-left-color: var(--red); } .task.blocked { border-left-color: var(--dim); }
+  .task .role { color: var(--violet); } .task .park { color: var(--red); white-space: pre-wrap; }
+  svg.edges { position: absolute; inset: 0; pointer-events: none; }
+  svg.edges path { stroke: var(--line); stroke-width: 1.2; fill: none; }
+  .note { border-left: 3px solid var(--line); padding: .4rem .8rem; margin: .5rem 0; background: var(--panel); border-radius: 0 4px 4px 0; }
+  .note.assumption { border-left-color: var(--amber); }
+  .note .chips { margin-top: .2rem; }
+  .chip { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 .6em; margin-right: .3em; font-size: .75rem; color: var(--blue); cursor: pointer; }
+  .note details { color: var(--dim); font-size: .8rem; }
+  input[type=search] { background: var(--panel); border: 1px solid var(--line); color: var(--text); font: inherit; padding: .3rem .6rem; border-radius: 4px; width: 20rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+  th, td { text-align: left; padding: .3rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 400; }
+  tr.sel { background: var(--panel); }
+  tr[data-name] { cursor: pointer; }
+  .hash { color: var(--dim); } .ok { color: var(--green); } .warn { color: var(--amber); } .bad { color: var(--red); }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; font-size: .8rem; }
+  .strip { display: flex; gap: .8rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .peer { border: 1px solid var(--line); border-radius: 4px; padding: .3rem .8rem; font-size: .8rem; }
+  .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .8rem; }
+  h2 { font-size: .9rem; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; margin: 1.6rem 0 .6rem; }
+  a { color: var(--blue); }
+  .empty { color: var(--dim); padding: 2rem 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>strand swarm</h1>
+  <nav>
+    <button data-tab="nodes">nodes</button>
+    <button data-tab="tasks">tasks</button>
+    <button data-tab="memory">memory</button>
+    <button data-tab="namespace">namespace</button>
+  </nav>
+  <span class="meta" id="meta">connecting…</span>
+</header>
+<main id="main"><div class="empty">waiting for the first snapshot…</div></main>
+<script>
+"use strict";
+let snap = null;
+let tab = "nodes";
+let selected = null;   // selected binding name on the namespace tab
+let memFilter = "";
+let highlightTask = null;
+
+const $ = (s, el) => (el || document).querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const short = (h) => esc(String(h).slice(0, 10));
+
+document.querySelectorAll("nav button").forEach((b) => {
+  b.addEventListener("click", () => { tab = b.dataset.tab; render(); });
+});
+
+function goto(t, opts) {
+  tab = t;
+  if (opts && opts.name) selected = opts.name;
+  if (opts && opts.task) highlightTask = opts.task;
+  if (opts && opts.filter !== undefined) memFilter = opts.filter;
+  render();
+}
+window.goto = goto;
+
+async function poll() {
+  try {
+    const res = await fetch("/api/snapshot");
+    snap = await res.json();
+    $("#meta").textContent = `round ${snap.now} · ${snap.tasks.length} tasks · ${snap.bindings.length} bindings`;
+  } catch (e) {
+    $("#meta").textContent = "snapshot unreachable";
+  }
+  render();
+}
+
+function render() {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  if (!snap) return;
+  const views = { nodes: renderNodes, tasks: renderTasks, memory: renderMemory, namespace: renderNamespace };
+  $("#main").innerHTML = views[tab]();
+  if (tab === "tasks") drawEdges();
+  if (tab === "memory") {
+    const inp = $("#memfilter");
+    if (inp) inp.addEventListener("input", (e) => { memFilter = e.target.value; render(); setTimeout(() => { const i = $("#memfilter"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 0); });
+  }
+}
+
+/* ---------- nodes (#43) ---------- */
+function renderNodes() {
+  const drained = snap.tasks.length > 0 && snap.tasks.every((t) => t.state === "done" || t.state === "parked");
+  if (snap.presence.length === 0) return '<div class="empty">no worker has ever heartbeated into this repo</div>';
+  const target = (id) => { const t = snap.tasks.find((x) => x.id === id); return t ? `${t.role} ${t.target.join(",")}` : ""; };
+  return '<div class="cards">' + snap.presence.map((n) => {
+    const status = n.alive ? "alive" : drained ? "finished" : "gone";
+    const cls = n.alive ? "alive" : drained ? "finished" : "gone";
+    return `<div class="card" id="node-${esc(n.workerId)}">
+      <h3><span class="dot ${cls}"></span>${esc(n.workerId)} <span class="dim">· ${esc(n.provider)}</span></h3>
+      <div>${n.currentTask ? `on task <a href="#" onclick="goto('tasks',{task:'${esc(n.currentTask)}'});return false">#${esc(n.currentTask)}</a> <span class="dim">${esc(target(n.currentTask))}</span>` : '<span class="dim">idle</span>'}</div>
+      <div class="dim">${n.done} done · ${n.parked} parked · last seen ${n.age} round${n.age === 1 ? "" : "s"} ago · ${status}${status === "gone" ? " quietly (TTL expired)" : status === "finished" ? " (queue drained)" : ""}</div>
+    </div>`;
+  }).join("") + "</div>";
+}
+
+/* ---------- tasks as a DAG (#44) ---------- */
+function depthOf(tasks) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const depth = new Map();
+  const d = (id, seen) => {
+    if (depth.has(id)) return depth.get(id);
+    if (seen.has(id)) return 0; // defensive: a cycle would otherwise hang the page
+    seen.add(id);
+    const t = byId.get(id);
+    const v = !t || t.deps.length === 0 ? 0 : 1 + Math.max(...t.deps.map((x) => d(x, seen)));
+    depth.set(id, v);
+    return v;
+  };
+  tasks.forEach((t) => d(t.id, new Set()));
+  return depth;
+}
+
+function renderTasks() {
+  if (snap.tasks.length === 0) return '<div class="empty">the queue is empty</div>';
+  const depth = depthOf(snap.tasks);
+  const maxD = Math.max(...depth.values());
+  const cols = [];
+  for (let i = 0; i <= maxD; i++) cols.push(snap.tasks.filter((t) => depth.get(t.id) === i));
+  const frontier = snap.tasks.filter((t) => t.state === "ready" && t.deps.every((d) => (snap.tasks.find((x) => x.id === d) || {}).state === "done"));
+  const frontierIds = new Set(frontier.map((t) => t.id));
+  return `<div class="dim">frontier (claimable now): ${frontier.length ? frontier.map((t) => "#" + esc(t.id)).join(" ") : "—"}</div>
+  <div class="lane" id="lane"><svg class="edges" id="edges"></svg>` + cols.map((col, i) => `
+    <div class="col"><div class="dim">depth ${i}</div>` + col.map((t) => `
+      <div class="task ${esc(t.state)}" data-task="${esc(t.id)}" ${highlightTask === t.id ? 'style="outline:1px solid var(--amber)"' : ""}>
+        <div><span class="role">${esc(t.role)}</span> <b>${esc(t.target.join(","))}</b> <span class="dim">#${esc(t.id)}</span>${frontierIds.has(t.id) ? ' <span class="ok">●</span>' : ""}</div>
+        <div class="dim">${esc(t.state)}${t.assignee ? ` · <a href="#" onclick="goto('nodes');return false">@${esc(t.assignee)}</a>` : ""}</div>
+        ${t.state === "parked" && t.lastComment ? `<div class="park">${esc(t.lastComment)}</div>` : ""}
+      </div>`).join("") + "</div>").join("") + "</div>";
+}
+
+function drawEdges() {
+  const lane = $("#lane"); const svg = $("#edges");
+  if (!lane || !svg) return;
+  const laneBox = lane.getBoundingClientRect();
+  svg.setAttribute("width", lane.scrollWidth);
+  svg.setAttribute("height", lane.scrollHeight);
+  let paths = "";
+  for (const t of snap.tasks) {
+    const to = lane.querySelector(`[data-task="${CSS.escape(t.id)}"]`);
+    if (!to) continue;
+    for (const dep of t.deps) {
+      const from = lane.querySelector(`[data-task="${CSS.escape(dep)}"]`);
+      if (!from) continue;
+      const a = from.getBoundingClientRect(); const b = to.getBoundingClientRect();
+      const x1 = a.right - laneBox.left + lane.scrollLeft, y1 = a.top + a.height / 2 - laneBox.top;
+      const x2 = b.left - laneBox.left + lane.scrollLeft, y2 = b.top + b.height / 2 - laneBox.top;
+      paths += `<path d="M${x1},${y1} C${x1 + 30},${y1} ${x2 - 30},${y2} ${x2},${y2}"/>`;
+    }
+  }
+  svg.innerHTML = paths;
+}
+
+/* ---------- decision memory (#45) ---------- */
+function renderMemory() {
+  const activeIds = new Set(snap.memory.activeIds);
+  const byId = new Map(snap.memory.notes.map((n) => [n.id, n]));
+  const supersededBy = new Map(snap.memory.notes.filter((n) => n.supersedes).map((n) => [n.supersedes, n.id]));
+  const f = memFilter.trim().toLowerCase();
+  const match = (n) => !f || n.targets.some((t) => t.toLowerCase().includes(f)) || n.subject.toLowerCase().includes(f) || n.body.toLowerCase().includes(f);
+  const activeNotes = snap.memory.notes.filter((n) => activeIds.has(n.id) && match(n));
+  const order = ["assumption", "convention", "spec", "rejected-alternative"];
+  const chain = (n) => {
+    const hist = [];
+    let cur = n;
+    while (cur.supersedes && byId.get(cur.supersedes)) { cur = byId.get(cur.supersedes); hist.push(cur); }
+    return hist;
+  };
+  const noteHtml = (n) => `<div class="note ${esc(n.type)}">
+    <div><b>${esc(n.subject)}</b> <span class="dim">by <a href="#" onclick="goto('nodes');return false">${esc(n.by)}</a></span></div>
+    <div>${esc(n.body)}</div>
+    <div class="chips">${n.targets.map((t) =>
+      /^\d+$/.test(t)
+        ? `<span class="chip" onclick="goto('tasks',{task:'${esc(t)}'})">task #${esc(t)}</span>`
+        : `<span class="chip" onclick="goto('namespace',{name:'${esc(t)}'})">${esc(t)}</span>`).join("")}</div>
+    ${chain(n).length ? `<details><summary>history (${chain(n).length} superseded)</summary>${chain(n).map((h) => `<div class="dim">↳ ${esc(h.body)} <i>— ${esc(h.by)}</i></div>`).join("")}</details>` : ""}
+  </div>`;
+  let html = `<input id="memfilter" type="search" placeholder="filter by target, subject, body… (what governs solveBoard?)" value="${esc(memFilter)}">`;
+  for (const t of order) {
+    const group = activeNotes.filter((n) => n.type === t);
+    if (group.length === 0) continue;
+    html += `<h2>${esc(t)}s${t === "assumption" ? ' <span class="warn">— the standing review queue</span>' : ""}</h2>` + group.map(noteHtml).join("");
+  }
+  if (activeNotes.length === 0) html += '<div class="empty">no live notes match</div>';
+  return html;
+}
+
+/* ---------- namespace (#46) ---------- */
+function renderNamespace() {
+  const peers = snap.merkle.peers.map((p) => {
+    const cls = p.root === null ? "bad" : p.root === snap.merkle.self ? "ok" : "warn";
+    const label = p.root === null ? "unreachable" : p.root === snap.merkle.self ? "converged" : "behind/ahead";
+    return `<span class="peer"><span class="${cls}">●</span> ${esc(p.url)} <span class="dim">${label}${p.root ? " · " + short(p.root) : ""}</span></span>`;
+  }).join("");
+  let html = `<div class="strip"><span class="peer">self <span class="dim">${short(snap.merkle.self)}</span></span>${peers}</div>`;
+
+  if (snap.conflicts.length > 0) {
+    html += `<h2 class="bad">parked conflicts — the one thing that needs a human</h2>`;
+    for (const c of snap.conflicts) {
+      html += `<div class="card"><h3>${esc(c.name)} <span class="dim">${c.contenders.length} contenders (settle with: strand resolve ${esc(c.name)} &lt;hash&gt;)</span></h3><div class="side">` +
+        c.contenders.map((k) => `<div><div class="dim">${short(k.hash)} by ${esc(k.by)} — ${esc(k.intent)}</div><pre>${esc(k.source)}</pre></div>`).join("") +
+        "</div></div>";
+    }
+  }
+
+  html += `<h2>bindings</h2><table><tr><th>name</th><th>type</th><th>hash</th><th>by</th><th>intent</th><th>attested</th><th>hints</th></tr>`;
+  for (const b of snap.bindings) {
+    const attest = b.requires.length
+      ? b.requires.every((r) => b.attested.includes(r)) ? '<span class="ok">green</span>' : `<span class="bad">missing ${esc(b.requires.filter((r) => !b.attested.includes(r)).join(","))}</span>`
+      : `<span class="dim">${esc(b.attested.join(",")) || "—"}</span>`;
+    const hint = b.activeIntents.length ? `<span class="warn">👥 ${esc(b.activeIntents.join(","))}</span>` : "";
+    html += `<tr data-name="${esc(b.name)}" class="${selected === b.name ? "sel" : ""}" onclick="goto('namespace',{name:'${esc(b.name)}'})">
+      <td><b>${esc(b.name)}</b></td><td class="dim">${esc(b.type)}</td><td class="hash">${short(b.hash)}</td>
+      <td>${esc(b.by)}</td><td class="dim">${esc(b.intent)}</td><td>${attest}</td><td>${hint}</td></tr>`;
+  }
+  html += "</table>";
+
+  const sel = snap.bindings.find((b) => b.name === selected);
+  if (sel) {
+    html += `<h2>${esc(sel.name)} — strand source</h2><pre>${esc(sel.source)}</pre>`;
+    const ts = extractTs(snap.emitTs, sel.name);
+    html += `<h2>${esc(sel.name)} — typescript projection</h2><pre>${esc(ts)}</pre>`;
+  }
+  return html;
+}
+
+function extractTs(module, name) {
+  const lines = module.split("\n");
+  const hits = lines.filter((l) => l.includes(`const ${name} `) || l.includes(`const ${name}:`) || l.startsWith(`export type ${name}`) || l.includes(`const ${name} =`));
+  return hits.length ? hits.join("\n") : "(not in the projection)";
+}
+
+poll();
+setInterval(poll, 3000);
+window.addEventListener("resize", () => { if (tab === "tasks") drawEdges(); });
+</script>
+</body>
+</html>

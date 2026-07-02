@@ -68,6 +68,20 @@ names the hint layer watches.
   is reclaimable after a TTL. Humans add tasks to the board while the swarm
   runs — that is the point.
 
+## Watching a run
+
+`strand-swarm dashboard --port 4200 [--peers http://a:4100,...] [--queue <dir> | --gh <owner/repo>]`
+starts a read-only observer: it gossips like any peer (so it sees what the
+swarm sees) but never submits, merges, claims or announces — losing it loses
+nothing. The page it serves has four views: **nodes** (worker presence
+heartbeats: provider, current task, done/parked, liveness by logical TTL),
+**tasks** (the queue as a dependency DAG, layered by depth, with the frontier
+marked and parked tasks showing the gate's actual complaint), **memory**
+(decision memory grouped by type, assumptions first — the standing review
+queue — with supersede history and target filtering), and **namespace** (every
+resolved binding with type, source and TS projection, parked conflicts
+side-by-side, live-intent hints, and a Merkle convergence strip per peer).
+
 ## Multi-machine
 
 Serve a repo to peers and let workers gossip:

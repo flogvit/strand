@@ -26,6 +26,9 @@ export interface Task {
   /** Checks to require on every definition this task lands (#51) — e.g.
    *  ["tests"], so `strand verify` becomes the workload's definition of done. */
   require?: string[];
+  /** The most recent report comment — for a parked task, the actual reason
+   *  (the green-gate's complaint), surfaced on the dashboard (#44). */
+  lastComment?: string;
   state: TaskState;
   assignee: string | null;
 }
@@ -137,7 +140,12 @@ export class FileQueue implements Queue {
     this.locked((tasks) => {
       const next = tasks.map((t) =>
         t.id === id
-          ? { ...t, state: update.state, assignee: update.unassign ? null : t.assignee }
+          ? {
+              ...t,
+              state: update.state,
+              assignee: update.unassign ? null : t.assignee,
+              ...(update.comment ? { lastComment: update.comment } : {}),
+            }
           : t,
       );
       return { tasks: next, result: undefined };
