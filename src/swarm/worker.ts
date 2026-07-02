@@ -214,6 +214,15 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
 /** #43: refresh this worker's presence — one more join on the CRDT plane the
  *  loop already gossips. Render-only: nothing ever reads it to decide. */
 function heartbeat(root: string, workerId: string, provider: string, currentTask: string | null, summary: WorkSummary): void {
+  try {
+    heartbeatUnsafe(root, workerId, provider, currentTask, summary);
+  } catch {
+    // Presence is render-only by contract — a failed beat (e.g. a torn read
+    // under parallel workers) must never take the work plane down with it.
+  }
+}
+
+function heartbeatUnsafe(root: string, workerId: string, provider: string, currentTask: string | null, summary: WorkSummary): void {
   const repo = loadRepo(root);
   const now = logicalNow(repo);
   repo.presence = beat(repo.presence, {

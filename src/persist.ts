@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Store, type StoredItem } from "./core/store.ts";
 import type { Hash } from "./core/term.ts";
@@ -66,7 +66,12 @@ function readJSON<T>(file: string, fallback: T): T {
 }
 
 function writeJSON(file: string, value: unknown): void {
-  writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
+  // Atomic via same-dir rename: parallel worker processes share these files,
+  // and a plain write lets a concurrent reader see a torn, unparsable file —
+  // which crashed a worker mid-run in the #36 measurement.
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value, null, 2) + "\n");
+  renameSync(tmp, file);
 }
 
 export function repoExists(root: string): boolean {

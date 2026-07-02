@@ -147,6 +147,21 @@ measured edge at this scale is coverage, not speed: 157 model-written tests
 vs. the single agent's 39. Decomposition pays when the graph is wider than its
 critical path or larger than one context window.
 
+**Stdlib, the wide-graph measurement** (`swarm-stdlib-live.sh`, #36): the
+first workload wider than its critical path — 58 definitions seeded with
+pinned contracts (113 tasks, width 41, critical path 3). Eight parallel
+`claude` worker processes drained it in **485 s wall clock** against a
+**2456 s serial cost** (Σ measured per-task seconds): a **5.1× speedup**,
+comfortably past the "parallel ≲ ¼ of serial" success bar — decomposition
+pays in wall clock once the graph is wide, exactly where Sudoku's chain
+could not. 113/113 tasks green, **804 model-written tests pass**, `strand
+untested` is empty, zero parked conflicts (the helper-prefix namespacing of
+#52 held at width 8). The run also caught two real defects live: a torn
+JSON read under eight concurrent writers crashed one worker (persistence is
+now atomic write-and-rename, and a presence heartbeat can no longer take a
+worker down), and the crashed worker's FileQueue claim had to be handed back
+by hand — the TTL-eviction that GhQueue has is a known FileQueue gap.
+
 **The website** (`swarm-site-live.ts`): 26 definitions — HTML kit, components,
 copy, CSS — with contracts pinned as spec notes and design/safety/voice
 conventions in memory. 37/38 tasks green (the straggler was a test task), 42

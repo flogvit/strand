@@ -42,7 +42,7 @@ echo "=== stdlib swarm ($WORKERS procs, $PROVIDER) ==="
 $SWARM status --root "$ROOT" | head -1
 echo "parallel wall clock : ${SECS}s"
 echo "serial cost (Σ task): ${SERIAL}s"
-echo "speedup             : $(awk "BEGIN{printf \"%.1fx\", $SERIAL/$SECS}")"
+echo "speedup             : $(awk -v a="$SERIAL" -v b="$SECS" 'BEGIN{printf "%.1fx", a/b}')"
 echo ""
 echo "strand test:"
 STRAND_ROOT="$ROOT" $STRAND test | tail -1
