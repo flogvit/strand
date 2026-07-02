@@ -62,3 +62,23 @@ test("a recursive definition still content-addresses well-foundedly", () => {
   const { names } = build(FAC);
   assert.ok(names.has("fac"));
 });
+
+// #40: the interpreter must not be depth-fragile — verification of arbitrary
+// swarm output runs on an explicit stack, not the JS call stack.
+test("deep recursion: 200k frames evaluate without blowing the JS stack", () => {
+  const { store, names } = build("def sum (n: Int) -> Int = if n < 1 then 0 else n + sum (n - 1)");
+  assert.equal(valueToString(evalQuery("sum 200000", store, names)), "20000100000");
+});
+
+test("deep data: building, comparing and printing a 50k-deep list", async () => {
+  const { registryOf } = await import("../src/pipeline.ts");
+  const src =
+    "data List a = Nil | Cons a (List a)\n" +
+    "def ups (n: Int) -> List Int = if n < 1 then Nil else Cons n (ups (n - 1))\n" +
+    "def same (n: Int) -> Bool = ups n == ups n";
+  const { ns, store, names } = build(src);
+  const registry = registryOf(ns, store);
+  assert.equal(valueToString(evalQuery("same 50000", store, names, registry)), "true");
+  const printed = valueToString(evalQuery("ups 50000", store, names, registry));
+  assert.ok(printed.startsWith("Cons 50000 (Cons 49999"));
+});
