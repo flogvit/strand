@@ -18,6 +18,9 @@ export interface DefSpec {
    *  swarm's decision memory so every agent building on this name sees the
    *  same API instead of inventing its own. */
   spec?: string;
+  /** Set false to skip the test task — for defs an external oracle verifies
+   *  (a fabricated duplicate-literal test would add nothing). Default true. */
+  test?: boolean;
 }
 
 /** Sudoku generator, decomposed. A wide graph — plenty of parallelism for ≥10 agents. */
@@ -80,6 +83,7 @@ function seedTasks(queue: Queue, defs: DefSpec[]): Task[] {
   }
 
   for (const d of defs) {
+    if (d.test === false) continue;
     created.push(
       queue.add({
         title: `test ${d.name}`,

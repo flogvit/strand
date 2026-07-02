@@ -19,7 +19,7 @@ import { seed, type DefSpec } from "../src/swarm/plan.ts";
 const DEFS: DefSpec[] = [
   { name: "escapeHtml", intent: "escape &<>\"", deps: [], spec: "escapeHtml : Text -> Text — replaces & < > \" with entities" },
   { name: "tag", intent: "build an element", deps: ["escapeHtml"], spec: "tag : Text -> Text -> Text -> Text — tag name, raw attrs, children" },
-  { name: "hero", intent: "hero section", deps: ["tag"] },
+  { name: "hero", intent: "hero section", deps: ["tag"], test: false },
 ];
 
 test("seeding with a root records pinned specs as decision-memory notes", () => {
@@ -28,7 +28,8 @@ test("seeding with a root records pinned specs as decision-memory notes", () => 
   const queue = new FileQueue(join(root, ".strand-swarm"));
 
   const tasks = seed(queue, DEFS, root);
-  assert.equal(tasks.length, 6, "code + test task per def, as before");
+  assert.equal(tasks.length, 5, "code task per def + test task only where test !== false");
+  assert.ok(!tasks.some((t) => t.role === "test" && t.target.includes("hero")), "oracle-verified defs get no test task");
 
   const repo = loadRepo(root);
   const tagNotes = forTarget(repo.memory, "tag");
@@ -45,6 +46,6 @@ test("seeding without a root behaves exactly as before", () => {
   initRepo(root);
   const queue = new FileQueue(join(root, ".strand-swarm"));
   const tasks = seed(queue, DEFS);
-  assert.equal(tasks.length, 6);
+  assert.equal(tasks.length, 5);
   assert.equal(loadRepo(root).memory.size, 0);
 });
