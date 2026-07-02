@@ -30,11 +30,16 @@ const TS_OP: Record<string, string> = {
   "==": "===", "&&": "&&", "||": "||", "++": "+",
 };
 
-// IO primitives transpile to TypeScript thunks (an IO a is a () => a).
+// IO primitives transpile to TypeScript thunks (an IO a is a () => a);
+// Text primitives are total, matching the interpreter exactly.
 const PRIM_TS: Record<string, string> = {
   print: "((s) => () => { console.log(s); return undefined; })",
   pure: "((x) => () => x)",
   andThen: "((io) => (f) => () => { const a = io(); return f(a)(); })",
+  textLength: "((s) => s.length)",
+  charAt: "((i) => (s) => (i >= 0 && i < s.length ? s[i] : \"\"))",
+  substring: "((a) => (b) => (s) => s.slice(Math.max(0, a), Math.max(0, b)))",
+  intToText: "((n) => String(n))",
 };
 
 function tsName(hash: Hash, nameOf: Map<Hash, string>): string {

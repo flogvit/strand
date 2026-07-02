@@ -49,9 +49,22 @@ export function valueToString(v: Value): string {
 const UNIT: Value = { tag: "Data", ctor: "Unit", fields: [] };
 
 function runPrim(name: string, args: Value[], store: Store, registry: Registry): Value {
+  const text = (i: number): string => (args[i] as { value: string }).value;
+  const int = (i: number): number => (args[i] as { value: number }).value;
   switch (name) {
     case "print":
       return { tag: "IO", run: () => (console.log((args[0] as { value: string }).value), UNIT) };
+    case "textLength":
+      return { tag: "Int", value: text(0).length };
+    case "charAt": {
+      const i = int(0);
+      const s = text(1);
+      return { tag: "Text", value: i >= 0 && i < s.length ? s[i] : "" };
+    }
+    case "substring":
+      return { tag: "Text", value: text(2).slice(Math.max(0, int(0)), Math.max(0, int(1))) };
+    case "intToText":
+      return { tag: "Text", value: String(int(0)) };
     case "pure":
       return { tag: "IO", run: () => args[0] };
     case "andThen":
