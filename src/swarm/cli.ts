@@ -35,7 +35,9 @@ const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestratio
   strand-swarm plan [--queue <dir> | --gh <owner/repo>]
                                                     seed the Sudoku decomposition as tasks
   strand-swarm work --as <id> --provider <name> [--root <dir>] [--queue <dir> | --gh <owner/repo>]
-                    [--peers <url,url>]             run a worker until the queue drains,
+                    [--peers <url,url>] [--poll <ms>] [--idle <n>]
+                                                    run a worker until the queue drains
+                                                    (exits after n empty polls, ms apart),
                                                     gossiping with the given peers
   strand-swarm status [--queue <dir> | --gh <owner/repo>]
                                                     show the task board
@@ -69,7 +71,13 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const peers = opts.peers ? opts.peers.split(",").map((p) => p.trim()).filter(Boolean) : [];
-      const summary = await work(queue, agentFor(provider), { root, workerId, peers });
+      const summary = await work(queue, agentFor(provider), {
+        root,
+        workerId,
+        peers,
+        maxIdlePolls: opts.idle ? Number(opts.idle) : undefined,
+        pollMs: opts.poll ? Number(opts.poll) : undefined,
+      });
       console.log(`${workerId}: ${summary.done.length} done, ${summary.parked.length} parked`);
       return 0;
     }
