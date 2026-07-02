@@ -47,6 +47,9 @@ export interface WorkSummary {
   provider: { timeouts: number; transient: number; permanent: number };
   /** Set when a permanent provider failure stopped the worker early. */
   stopped?: string;
+  /** Wall seconds spent per task id (all attempts) — the serial cost of this
+   *  worker's share, so drivers can compare parallel wall clock to Σ task time. */
+  seconds: Record<string, number>;
 }
 
 function strand(root: string, args: string[]): string {
@@ -227,7 +230,7 @@ function heartbeat(root: string, workerId: string, provider: string, currentTask
 
 export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Promise<WorkSummary> {
   const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3, backoffMs = 1000, token } = opts;
-  const summary: WorkSummary = { workerId, done: [], parked: [], provider: { timeouts: 0, transient: 0, permanent: 0 } };
+  const summary: WorkSummary = { workerId, done: [], parked: [], provider: { timeouts: 0, transient: 0, permanent: 0 }, seconds: {} };
   const attempts = new Map<string, number>();
   const lastFailure = new Map<string, string>();
   let idle = 0;
@@ -273,11 +276,17 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
       [...task.target, task.id].flatMap((t) => forTarget(repo.memory, t)).map((n) => [n.id, n]),
     ).values()];
 
+    const startedAt = Date.now();
+    const clock = (): void => {
+      summary.seconds[task.id] = (summary.seconds[task.id] ?? 0) + (Date.now() - startedAt) / 1000;
+    };
     let outcome: { state: "done" | "ready"; comment: string; assumptions: string[] };
     try {
       outcome = attempt(root, workerId, agent, task, notes, lastFailure.get(task.id));
       consecutiveTransient = 0;
+      clock();
     } catch (e) {
+      clock();
       if (e instanceof ProviderError) {
         if (e.kind === "permanent") {
           // The provider is unusable (auth, missing binary): hand the task back

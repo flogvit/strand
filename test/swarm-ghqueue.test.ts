@@ -12,26 +12,46 @@ interface FakeIssue {
   title: string;
   body: string;
   labels: string[];
-  assignees: string[];
   state: "open" | "closed";
   comments: string[];
+  updatedAt: number;
 }
 
 /** A minimal GitHub: just enough `gh` surface for GhQueue. */
-function fakeGh(): { runner: GhRunner; issues: FakeIssue[]; now: () => number; tick: (ms: number) => void } {
+function fakeGh(): { runner: GhRunner; issues: FakeIssue[]; labels: Set<string>; now: () => number; tick: (ms: number) => void } {
   const issues: FakeIssue[] = [];
+  const repoLabels = new Set<string>();
   let clock = 1_000_000;
 
   const runner: GhRunner = (args: string[]) => {
     const cmd = args.slice(0, 2).join(" ");
 
+    if (cmd === "label create") {
+      repoLabels.add(args[2]);
+      return "";
+    }
+
     if (cmd === "issue create") {
       const title = args[args.indexOf("--title") + 1];
       const body = args[args.indexOf("--body") + 1];
       const labels = args.flatMap((a, i) => (args[i - 1] === "--label" ? a.split(",") : []));
+      for (const l of labels) if (!repoLabels.has(l)) throw new Error(`fake gh: label '${l}' does not exist`);
       const number = issues.length + 1;
-      issues.push({ number, title, body, labels, assignees: [], state: "open", comments: [] });
+      issues.push({ number, title, body, labels, state: "open", comments: [], updatedAt: clock });
       return `https://github.com/o/r/issues/${number}`;
+    }
+
+    if (cmd === "issue view") {
+      const n = Number(args[2]);
+      const i = issues.find((x) => x.number === n)!;
+      return JSON.stringify({
+        number: i.number,
+        title: i.title,
+        body: i.body,
+        labels: i.labels.map((name) => ({ name })),
+        state: i.state.toUpperCase(),
+        updatedAt: new Date(i.updatedAt).toISOString(),
+      });
     }
 
     if (cmd === "issue list") {
@@ -41,8 +61,8 @@ function fakeGh(): { runner: GhRunner; issues: FakeIssue[]; now: () => number; t
           title: i.title,
           body: i.body,
           labels: i.labels.map((name) => ({ name })),
-          assignees: i.assignees.map((login) => ({ login })),
           state: i.state.toUpperCase(),
+          updatedAt: new Date(i.updatedAt).toISOString(),
         })),
       );
     }
@@ -54,34 +74,38 @@ function fakeGh(): { runner: GhRunner; issues: FakeIssue[]; now: () => number; t
         const flag = args[i];
         const value = args[i + 1];
         if (flag === "--add-label") {
-          for (const l of value.split(",")) if (!issue.labels.includes(l)) issue.labels.push(l);
+          for (const l of value.split(",")) {
+            if (!repoLabels.has(l)) throw new Error(`fake gh: label '${l}' does not exist`);
+            if (!issue.labels.includes(l)) issue.labels.push(l);
+          }
         } else if (flag === "--remove-label") {
           issue.labels = issue.labels.filter((l) => !value.split(",").includes(l));
-        } else if (flag === "--add-assignee") {
-          if (!issue.assignees.includes(value)) issue.assignees.push(value);
-        } else if (flag === "--remove-assignee") {
-          issue.assignees = issue.assignees.filter((a) => a !== value);
         }
       }
+      issue.updatedAt = clock;
       return "";
     }
 
     if (cmd === "issue comment") {
       const n = Number(args[2]);
-      issues.find((i) => i.number === n)!.comments.push(args[args.indexOf("--body") + 1]);
+      const issue = issues.find((i) => i.number === n)!;
+      issue.comments.push(args[args.indexOf("--body") + 1]);
+      issue.updatedAt = clock;
       return "";
     }
 
     if (cmd === "issue close") {
       const n = Number(args[2]);
-      issues.find((i) => i.number === n)!.state = "closed";
+      const issue = issues.find((i) => i.number === n)!;
+      issue.state = "closed";
+      issue.updatedAt = clock;
       return "";
     }
 
     throw new Error(`fake gh: unhandled ${args.join(" ")}`);
   };
 
-  return { runner, issues, now: () => clock, tick: (ms) => (clock += ms) };
+  return { runner, issues, labels: repoLabels, now: () => clock, tick: (ms) => (clock += ms) };
 }
 
 function queueWith(gh: ReturnType<typeof fakeGh>, opts: { claimTtlMs?: number } = {}): GhQueue {
@@ -161,6 +185,45 @@ test("report parks with a comment and frees the task for reclaim", () => {
 
   const issue = gh.issues[0];
   assert.ok(issue.comments.some((c) => c.includes("green-gate rejected")));
-  assert.deepEqual(issue.assignees, []);
+  assert.ok(!issue.labels.some((l) => l.startsWith("claimed-by:")), "claim label removed");
   assert.ok(q.claim("w2"), "freed task is claimable again");
+});
+
+// #37 (found live): claims are labels, not assignees — one GitHub login runs
+// many workers. A race leaves two labels; the sorted-first worker wins.
+test("claims are claimed-by labels; a race resolves to the sorted-first worker", () => {
+  const gh = fakeGh();
+  const q = queueWith(gh);
+  q.add({ title: "code add", role: "code", intent: "adder", target: ["add"], deps: [] });
+
+  const t = q.claim("w2");
+  assert.equal(t!.assignee, "w2");
+  assert.ok(gh.issues[0].labels.includes("claimed-by:w2"), "claim is a label");
+
+  // simulate the race: another worker's label landed alongside before verify
+  gh.issues[0].labels.push("claimed-by:w1");
+  gh.labels.add("claimed-by:w1");
+  assert.equal(q.list()[0].assignee, "w1", "sorted-first worker is the winner everywhere");
+});
+
+test("labels are created idempotently before use (a fresh repo has none)", () => {
+  const gh = fakeGh();
+  const q = queueWith(gh);
+  // add would throw if strand-task/role/state labels were not created first
+  q.add({ title: "code add", role: "code", intent: "adder", target: ["add"], deps: [] });
+  assert.ok(gh.labels.has("strand-task"));
+  assert.ok(gh.labels.has("role:code"));
+  assert.ok(gh.labels.has("state:ready"));
+});
+
+// #37 (found live): an empty deps: line must not swallow the next body line.
+test("an empty deps field followed by more body lines parses as no deps", () => {
+  const gh = fakeGh();
+  const q = queueWith(gh);
+  q.add({ title: "code x", role: "code", intent: "i", target: ["x"], deps: [], helperPrefix: "x", require: ["tests"] });
+  const t = q.list()[0];
+  assert.deepEqual(t.deps, [], "deps is empty, not the prefix line");
+  assert.equal(t.helperPrefix, "x");
+  assert.deepEqual(t.require, ["tests"]);
+  assert.ok(q.claim("w1"), "the dep-free task is claimable");
 });

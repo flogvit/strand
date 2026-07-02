@@ -94,7 +94,36 @@ npm run strand-swarm -- serve --port 4100 --host 0.0.0.0 --token <secret>
 elsewhere with `--peers http://that-host:4100 --token <secret>`. The token
 (defaulting to `$STRAND_SYNC_TOKEN` on both sides) authenticates every pull —
 without one the transport is open and belongs on trusted networks only (see
-SECURITY.md). Convergence is
+SECURITY.md).
+
+### Two-machine runbook (#38)
+
+One green namespace across two boxes, with GitHub as the shared task board
+and HTTP gossip as the sync plane:
+
+1. **Both machines**: clone the repo, `npm install`, log in `gh`, and export
+   the same `STRAND_SYNC_TOKEN`. Each machine gets its own local store:
+   `STRAND_ROOT=~/swarm-a npx tsx src/cli.ts init` (then submit + merge
+   `lib/prelude.strand`).
+2. **Machine A**: serve the store and start a worker:
+   `npx tsx src/swarm/cli.ts serve --root ~/swarm-a --port 4100 --host 0.0.0.0 &`
+   `npx tsx src/swarm/cli.ts work --as a1 --provider claude --root ~/swarm-a --gh <owner/repo> --peers http://B:4100 --poll 5000 --idle 24`
+3. **Machine B**: mirror it, pointing at A:
+   `npx tsx src/swarm/cli.ts serve --root ~/swarm-b --port 4100 --host 0.0.0.0 &`
+   `npx tsx src/swarm/cli.ts work --as b1 --provider claude --root ~/swarm-b --gh <owner/repo> --peers http://A:4100 --poll 5000 --idle 24`
+4. **Seed** the graph from either machine:
+   `npx tsx src/swarm/cli.ts plan --stdlib --root ~/swarm-a --gh <owner/repo>`
+5. **Watch** from anywhere:
+   `npx tsx src/swarm/cli.ts dashboard --root ~/observer --gh <owner/repo> --peers http://A:4100,http://B:4100`
+   — the namespace tab's convergence strip shows both Merkle roots against
+   the observer's; three matching digests = one green namespace.
+
+Behavior under failure: a machine dropping mid-run costs nothing —
+its claims go stale on the board (TTL on the issue's updatedAt) and are
+reclaimed; gossip skips dead peers; when it returns, one anti-entropy round
+pulls exactly the Merkle diff. Behind NAT, only reachability suffers: a peer
+that cannot be dialed still pulls (the transport is pull-only and symmetric,
+so one reachable direction is enough for convergence — it is just slower). Convergence is
 by construction (store union + CRDT join); anti-entropy keeps the exchange
 proportional to the diff. `test/swarm-multimachine.test.ts` is the executable
 proof: worker B lands a definition that only typechecks because gossip pulled

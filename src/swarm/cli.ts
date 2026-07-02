@@ -32,7 +32,7 @@ function parseArgs(argv: string[]): Args {
 
 const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestration
 
-  strand-swarm plan [--goal "<text>" --provider <name>] [--dry-run] [--require-tests]
+  strand-swarm plan [--stdlib] [--goal "<text>" --provider <name>] [--dry-run] [--require-tests]
                     [--queue <dir> | --gh <owner/repo>]
                                                     decompose a goal into a validated task
                                                     graph via a model (#39) and seed it;
@@ -82,7 +82,8 @@ async function main(argv: string[]): Promise<number> {
       const seedOpts = { requireTests: opts["require-tests"] === "true" };
 
       if (!opts.goal) {
-        const tasks = seed(queue, undefined, seedRoot, seedOpts);
+        const defs = opts.stdlib ? (await import("./stdlib.ts")).STDLIB : undefined;
+        const tasks = seed(queue, defs, seedRoot, seedOpts);
         console.log(`seeded ${tasks.length} tasks into ${queueName}`);
         return 0;
       }
@@ -132,6 +133,9 @@ async function main(argv: string[]): Promise<number> {
           ? `, provider: ${ph.timeouts} timeout / ${ph.transient} transient / ${ph.permanent} permanent`
           : "";
       console.log(`${workerId}: ${summary.done.length} done, ${summary.parked.length} parked${health}`);
+      for (const [id, secs] of Object.entries(summary.seconds)) {
+        console.log(`timing ${id}=${secs.toFixed(1)}s`);
+      }
       if (summary.stopped) {
         console.error(`${workerId} stopped early: ${summary.stopped}`);
         return 1;

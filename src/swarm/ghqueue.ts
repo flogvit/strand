@@ -6,15 +6,18 @@ import type { Queue, ReportUpdate, Role, Task, TaskSpec, TaskState } from "./que
  *  human can post to mid-run. The queue stays dumb and robust: an issue per
  *  task, labels for role/state, the body for intent/targets/deps.
  *
- *  GitHub offers no compare-and-swap, so `claim` is optimistic with verification:
- *  assign yourself, re-read, and if a race left several assignees the
- *  lexicographically-first wins — everyone computes the same winner, losers
- *  withdraw. A claim carries a `claimed-at:<epoch-ms>` label; a crashed worker's
- *  claim simply goes stale and is reclaimable after the TTL, so nothing is ever
- *  stuck behind a dead machine. Worker ids double as GitHub logins in a real
- *  run (assignment requires a real user). */
+ *  Claims are `claimed-by:<worker>` labels, not assignees — a single-operator
+ *  swarm has one GitHub login for many workers, so assignment cannot identify
+ *  a worker (#37 found this live). GitHub offers no compare-and-swap, so
+ *  `claim` is optimistic with verification: add your label, re-read, and if a
+ *  race left several claim labels the lexicographically-first worker wins —
+ *  everyone computes the same winner, losers withdraw. Claim freshness rides
+ *  on the issue's own `updatedAt` (every claim, report and comment bumps it),
+ *  so a crashed worker's claim goes stale and is reclaimable after the TTL
+ *  without a timestamp label per claim polluting the label namespace. */
 
 const TASK_LABEL = "strand-task";
+const CLAIM_PREFIX = "claimed-by:";
 const DEFAULT_CLAIM_TTL_MS = 15 * 60 * 1000;
 
 /** Run one `gh` invocation (args exclude the `gh` itself) and return stdout.
@@ -34,8 +37,8 @@ interface GhIssue {
   title: string;
   body: string;
   labels: { name: string }[];
-  assignees: { login: string }[];
   state: string;
+  updatedAt: string;
 }
 
 function realRunner(repo: string): GhRunner {
@@ -51,7 +54,10 @@ function bodyOf(spec: TaskSpec): string {
 }
 
 function fieldOf(body: string, key: string): string {
-  const m = body.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
+  // [ \t] only: \s would eat the newline after an empty field and capture the
+  // NEXT line as the value ("deps:\nprefix: x" -> deps ["prefix: x"]) — which
+  // left every dep-free task permanently blocked (#37, found live).
+  const m = body.match(new RegExp(`^${key}:[ \\t]*(.*)$`, "m"));
   return m ? m[1].trim() : "";
 }
 
@@ -61,11 +67,33 @@ export class GhQueue implements Queue {
   private readonly runner: GhRunner;
   private readonly now: () => number;
   private readonly claimTtlMs: number;
+  /** Labels confirmed to exist — `gh` rejects unknown labels, so each is
+   *  created (idempotently) before first use. */
+  private readonly knownLabels = new Set<string>();
 
   constructor(opts: GhQueueOptions) {
     this.runner = opts.runner ?? realRunner(opts.repo);
     this.now = opts.now ?? Date.now;
     this.claimTtlMs = opts.claimTtlMs ?? DEFAULT_CLAIM_TTL_MS;
+  }
+
+  private ensureLabel(name: string): void {
+    if (this.knownLabels.has(name)) return;
+    try {
+      this.runner(["label", "create", name, "--force"]);
+    } catch {
+      // an existing label (or a race creating it) is exactly what we want
+    }
+    this.knownLabels.add(name);
+  }
+
+  /** One issue, read directly — strongly consistent, unlike the list. */
+  private viewIssue(number: number): GhIssue {
+    const out = this.runner([
+      "issue", "view", String(number),
+      "--json", "number,title,body,labels,state,updatedAt",
+    ]);
+    return JSON.parse(out) as GhIssue;
   }
 
   private issues(): GhIssue[] {
@@ -74,9 +102,17 @@ export class GhQueue implements Queue {
       "--label", TASK_LABEL,
       "--state", "all",
       "--limit", "500",
-      "--json", "number,title,body,labels,assignees,state",
+      "--json", "number,title,body,labels,state,updatedAt",
     ]);
     return (JSON.parse(out) as GhIssue[]).sort((a, b) => a.number - b.number);
+  }
+
+  private claimants(issue: GhIssue): string[] {
+    return issue.labels
+      .map((l) => l.name)
+      .filter((l) => l.startsWith(CLAIM_PREFIX))
+      .map((l) => l.slice(CLAIM_PREFIX.length))
+      .sort();
   }
 
   private toTask(issue: GhIssue): Task {
@@ -93,24 +129,20 @@ export class GhQueue implements Queue {
       ...(fieldOf(issue.body, "prefix") ? { helperPrefix: fieldOf(issue.body, "prefix") } : {}),
       ...(csv(fieldOf(issue.body, "require")).length ? { require: csv(fieldOf(issue.body, "require")) } : {}),
       state,
-      assignee: issue.assignees[0]?.login ?? null,
+      assignee: this.claimants(issue)[0] ?? null,
     };
   }
 
-  private claimedAt(issue: GhIssue): number | undefined {
-    const l = issue.labels.map((x) => x.name).find((x) => x.startsWith("claimed-at:"));
-    return l ? Number(l.slice("claimed-at:".length)) : undefined;
-  }
-
-  /** A live claim blocks; a stale one (crashed worker) does not. */
+  /** A live claim blocks; a stale one (crashed worker — the issue has not been
+   *  touched within the TTL) does not. */
   private claimIsLive(issue: GhIssue): boolean {
-    if (issue.assignees.length === 0) return false;
-    const at = this.claimedAt(issue);
-    return at === undefined || this.now() - at <= this.claimTtlMs;
+    if (this.claimants(issue).length === 0) return false;
+    return this.now() - Date.parse(issue.updatedAt) <= this.claimTtlMs;
   }
 
   add(spec: TaskSpec): Task {
     const labels = [TASK_LABEL, `role:${spec.role}`, `state:${spec.state ?? "ready"}`];
+    for (const l of labels) this.ensureLabel(l);
     const url = this.runner([
       "issue", "create",
       "--title", spec.title,
@@ -147,21 +179,30 @@ export class GhQueue implements Queue {
 
     for (const issue of issues) {
       const task = this.toTask(issue);
-      if (task.state !== "ready" || this.claimIsLive(issue) || !doneDeps(task)) continue;
+      if (task.state !== "ready" || !doneDeps(task)) continue;
 
-      // evict a stale claim, then claim optimistically
+      // The list endpoint is eventually consistent (#37, found live): it can
+      // show a claim that was already withdrawn — or hide one just placed.
+      // Decide liveness from a fresh single-issue read.
+      const fresh = this.viewIssue(issue.number);
+      const freshTask = this.toTask(fresh);
+      if (freshTask.state !== "ready" || this.claimIsLive(fresh)) continue;
+
+      // evict any stale claim, then claim optimistically
+      this.ensureLabel(`${CLAIM_PREFIX}${workerId}`);
       const edit: string[] = ["issue", "edit", String(issue.number)];
-      for (const a of issue.assignees) edit.push("--remove-assignee", a.login);
-      const oldStamp = issue.labels.map((l) => l.name).find((l) => l.startsWith("claimed-at:"));
-      if (oldStamp) edit.push("--remove-label", oldStamp);
-      edit.push("--add-assignee", workerId, "--add-label", `claimed-at:${this.now()}`);
+      for (const c of this.claimants(fresh)) edit.push("--remove-label", `${CLAIM_PREFIX}${c}`);
+      edit.push("--add-label", `${CLAIM_PREFIX}${workerId}`);
       this.runner(edit);
 
-      // verify: races leave several assignees; the sorted-first wins everywhere
-      const after = this.issues().find((i) => i.number === issue.number)!;
-      const winner = after.assignees.map((a) => a.login).sort()[0];
+      // verify: a race leaves several claim labels; the sorted-first worker
+      // wins everywhere, losers withdraw their own label. Read the single
+      // issue — the list endpoint is eventually consistent and can still be
+      // blind to the label we just added (#37, found live).
+      const after = this.viewIssue(issue.number);
+      const winner = this.claimants(after)[0];
       if (winner === workerId) return { ...task, assignee: workerId };
-      this.runner(["issue", "edit", String(issue.number), "--remove-assignee", workerId]);
+      this.runner(["issue", "edit", String(issue.number), "--remove-label", `${CLAIM_PREFIX}${workerId}`]);
     }
     return undefined;
   }
@@ -172,13 +213,12 @@ export class GhQueue implements Queue {
     const labels = issue.labels.map((l) => l.name);
     const oldState = labels.find((l) => l.startsWith("state:"));
 
+    this.ensureLabel(`state:${update.state}`);
     const edit: string[] = ["issue", "edit", String(issue.number)];
-    if (oldState) edit.push("--remove-label", oldState);
+    if (oldState && oldState !== `state:${update.state}`) edit.push("--remove-label", oldState);
     edit.push("--add-label", `state:${update.state}`);
     if (update.unassign) {
-      for (const a of issue.assignees) edit.push("--remove-assignee", a.login);
-      const stamp = labels.find((l) => l.startsWith("claimed-at:"));
-      if (stamp) edit.push("--remove-label", stamp);
+      for (const c of this.claimants(issue)) edit.push("--remove-label", `${CLAIM_PREFIX}${c}`);
     }
     this.runner(edit);
 
