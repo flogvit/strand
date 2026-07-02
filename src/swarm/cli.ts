@@ -32,8 +32,13 @@ function parseArgs(argv: string[]): Args {
 
 const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestration
 
-  strand-swarm plan [--queue <dir> | --gh <owner/repo>] [--require-tests]
-                                                    seed the Sudoku decomposition as tasks
+  strand-swarm plan [--goal "<text>" --provider <name>] [--dry-run] [--require-tests]
+                    [--queue <dir> | --gh <owner/repo>]
+                                                    decompose a goal into a validated task
+                                                    graph via a model (#39) and seed it;
+                                                    without --goal, seed the hand-written
+                                                    Sudoku decomposition. --dry-run prints
+                                                    the plan + shape without seeding.
                                                     (--require-tests gates every landed def
                                                     on attested tests — verify is then done)
   strand-swarm work --as <id> --provider <name> [--root <dir>] [--queue <dir> | --gh <owner/repo>]
@@ -73,9 +78,34 @@ async function main(argv: string[]): Promise<number> {
   switch (cmd) {
     case "plan": {
       const { repoExists } = await import("../persist.ts");
-      const tasks = seed(queue, undefined, repoExists(root) ? root : undefined, {
-        requireTests: opts["require-tests"] === "true",
-      });
+      const seedRoot = repoExists(root) ? root : undefined;
+      const seedOpts = { requireTests: opts["require-tests"] === "true" };
+
+      if (!opts.goal) {
+        const tasks = seed(queue, undefined, seedRoot, seedOpts);
+        console.log(`seeded ${tasks.length} tasks into ${queueName}`);
+        return 0;
+      }
+
+      // #39: the agentic planner — goal -> validated DefSpec[] -> shape report
+      // -> tasks, with pinned specs landing as spec notes like hand-seeded ones.
+      const { planGoal } = await import("./planner.ts");
+      const provider = opts.provider;
+      if (!provider) {
+        console.error("plan --goal requires --provider <name>");
+        return 2;
+      }
+      const { specs, shape } = planGoal(opts.goal, provider);
+      console.log(`plan: ${shape.defs} definitions, critical path ${shape.criticalPath}, width ${shape.width}`);
+      if (shape.hot.length > 0) console.log(`hot names: ${shape.hot.map((h) => `${h.name}(fan-in ${h.fanIn})`).join(", ")}`);
+      for (const d of specs) {
+        console.log(`  ${d.name} <- [${d.deps.join(", ")}] — ${d.intent}${d.spec ? " (spec pinned)" : ""}`);
+      }
+      if (opts["dry-run"]) {
+        console.log("dry run: nothing seeded");
+        return 0;
+      }
+      const tasks = seed(queue, specs, seedRoot, seedOpts);
       console.log(`seeded ${tasks.length} tasks into ${queueName}`);
       return 0;
     }
