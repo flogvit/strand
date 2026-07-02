@@ -78,7 +78,16 @@ async function main(argv: string[]): Promise<number> {
         maxIdlePolls: opts.idle ? Number(opts.idle) : undefined,
         pollMs: opts.poll ? Number(opts.poll) : undefined,
       });
-      console.log(`${workerId}: ${summary.done.length} done, ${summary.parked.length} parked`);
+      const ph = summary.provider;
+      const health =
+        ph.timeouts + ph.transient + ph.permanent > 0
+          ? `, provider: ${ph.timeouts} timeout / ${ph.transient} transient / ${ph.permanent} permanent`
+          : "";
+      console.log(`${workerId}: ${summary.done.length} done, ${summary.parked.length} parked${health}`);
+      if (summary.stopped) {
+        console.error(`${workerId} stopped early: ${summary.stopped}`);
+        return 1;
+      }
       return 0;
     }
 

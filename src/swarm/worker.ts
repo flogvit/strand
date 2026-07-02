@@ -8,7 +8,7 @@ import { announce, shouldAvoid, shouldConsult } from "../distributed/hints.ts";
 import { forTarget, record, type Note } from "../distributed/memory.ts";
 import { gossipOnce } from "../distributed/transport.ts";
 import { loadRepo, saveRepo, type RepoState } from "../persist.ts";
-import type { Agent } from "./adapter.ts";
+import { ProviderError, type Agent } from "./adapter.ts";
 import type { Queue, Task } from "./queue.ts";
 
 /** The work plane. A worker pulls a ready task, hands it to a provider-agnostic
@@ -30,12 +30,19 @@ export interface WorkerOptions {
   peers?: string[];
   /** Attempts on the same task before this worker parks it for someone else. */
   maxAttempts?: number;
+  /** Base backoff after a transient provider failure (doubles per consecutive
+   *  failure, capped at 32x). */
+  backoffMs?: number;
 }
 
 export interface WorkSummary {
   workerId: string;
   done: string[];
   parked: string[];
+  /** Provider health this run, so drivers can report it. */
+  provider: { timeouts: number; transient: number; permanent: number };
+  /** Set when a permanent provider failure stopped the worker early. */
+  stopped?: string;
 }
 
 function strand(root: string, args: string[]): string {
@@ -134,11 +141,12 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
 }
 
 export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Promise<WorkSummary> {
-  const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3 } = opts;
-  const summary: WorkSummary = { workerId, done: [], parked: [] };
+  const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3, backoffMs = 1000 } = opts;
+  const summary: WorkSummary = { workerId, done: [], parked: [], provider: { timeouts: 0, transient: 0, permanent: 0 } };
   const attempts = new Map<string, number>();
   const lastFailure = new Map<string, string>();
   let idle = 0;
+  let consecutiveTransient = 0;
 
   while (idle < maxIdlePolls) {
     // pull the sync plane first, so definitions landed on other machines are
@@ -181,8 +189,31 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
     let outcome: { state: "done" | "ready"; comment: string; assumptions: string[] };
     try {
       outcome = attempt(root, workerId, agent, task, notes, lastFailure.get(task.id));
+      consecutiveTransient = 0;
     } catch (e) {
-      outcome = { state: "ready", comment: `worker error: ${(e as Error).message.split("\n")[0]}`, assumptions: [] };
+      if (e instanceof ProviderError) {
+        if (e.kind === "permanent") {
+          // The provider is unusable (auth, missing binary): hand the task back
+          // untouched and stop — every further claim would fail the same way.
+          summary.provider.permanent++;
+          summary.stopped = e.message;
+          queue.report(task.id, { state: "ready", unassign: true, comment: `worker stopped: ${e.message}` });
+          break;
+        }
+        if (e.kind === "transient") {
+          // The model never replied — no attempt burned; back off and retry.
+          summary.provider.transient++;
+          attempts.set(task.id, tries - 1);
+          queue.report(task.id, { state: "ready", unassign: true, comment: e.message });
+          const wait = backoffMs * Math.min(32, 2 ** consecutiveTransient++);
+          if (wait > 0) await delay(wait);
+          continue;
+        }
+        summary.provider.timeouts++;
+        outcome = { state: "ready", comment: e.message, assumptions: [] };
+      } else {
+        outcome = { state: "ready", comment: `worker error: ${(e as Error).message.split("\n")[0]}`, assumptions: [] };
+      }
     }
     if (outcome.state !== "done") lastFailure.set(task.id, outcome.comment);
 

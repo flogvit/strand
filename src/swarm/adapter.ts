@@ -99,15 +99,55 @@ export interface CliProvider {
   provider: string;
   command: string;
   args: string[];
+  /** Kill the subprocess after this long — a hung model call must not wedge a
+   *  worker forever. */
+  timeoutMs?: number;
+}
+
+/** How a provider call failed, so the worker can react differently:
+ *  - timeout: the subprocess was killed after timeoutMs — park path, distinct outcome
+ *  - transient: rate limit / 5xx / network — retry with backoff, no attempt burned
+ *  - permanent: auth failure / missing binary — stop the worker with a clear message */
+export type ProviderFailureKind = "timeout" | "transient" | "permanent";
+
+export class ProviderError extends Error {
+  constructor(
+    readonly kind: ProviderFailureKind,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProviderError";
+  }
 }
 
 /** Best-effort presets. Flags are the seam we expect to adjust per environment;
  *  the interface is what stays fixed. */
 export const PROVIDERS: Record<string, CliProvider> = {
-  claude: { provider: "claude", command: "claude", args: ["-p", "{prompt}"] },
-  codex: { provider: "codex", command: "codex", args: ["exec", "{prompt}"] },
-  gemini: { provider: "gemini", command: "gemini", args: ["-p", "{prompt}"] },
+  claude: { provider: "claude", command: "claude", args: ["-p", "{prompt}"], timeoutMs: 600_000 },
+  codex: { provider: "codex", command: "codex", args: ["exec", "{prompt}"], timeoutMs: 600_000 },
+  gemini: { provider: "gemini", command: "gemini", args: ["-p", "{prompt}"], timeoutMs: 600_000 },
 };
+
+const TRANSIENT_RE = /rate.?limit|too many requests|429|overloaded|50[023-4]|internal server error|service unavailable|temporar|try again|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EAI_AGAIN|socket hang up/i;
+const PERMANENT_RE = /unauthorized|forbidden|401|403|invalid.{0,20}(api.?key|token|credential)|api.?key.{0,20}(invalid|missing|not set)|not logged in|please (log|sign) ?in|authentication/i;
+
+/** Map a subprocess failure to a ProviderError. Exported for tests. */
+export function classifyExecError(e: unknown, provider: string, timeoutMs: number): ProviderError {
+  const err = e as Error & { code?: string; signal?: string; killed?: boolean; stderr?: string; stdout?: string };
+  if (err.code === "ETIMEDOUT" || (err.killed && (err.signal === "SIGTERM" || err.signal === "SIGKILL"))) {
+    return new ProviderError("timeout", `provider timeout: ${provider} produced nothing within ${timeoutMs}ms`);
+  }
+  if (err.code === "ENOENT") {
+    return new ProviderError("permanent", `provider binary not found: '${provider}' — is it installed and on PATH?`);
+  }
+  const detail = [err.stderr, err.stdout, err.message].filter(Boolean).join("\n");
+  const firstLine = (err.stderr?.trim() || err.message).split("\n")[0];
+  if (PERMANENT_RE.test(detail)) return new ProviderError("permanent", `provider auth failure (${provider}): ${firstLine}`);
+  if (TRANSIENT_RE.test(detail)) return new ProviderError("transient", `provider transient failure (${provider}): ${firstLine}`);
+  // Unknown exec errors are treated as transient: the model never replied, so
+  // there is no output to judge and a retry is the only move that can learn more.
+  return new ProviderError("transient", `provider failure (${provider}): ${firstLine}`);
+}
 
 export class CliAgent implements Agent {
   readonly provider: string;
@@ -119,11 +159,19 @@ export class CliAgent implements Agent {
     const prompt = buildPrompt(ctx);
     const usesPlaceholder = this.spec.args.some((a) => a.includes("{prompt}"));
     const args = this.spec.args.map((a) => a.replace("{prompt}", prompt));
-    const reply = execFileSync(this.spec.command, args, {
-      input: usesPlaceholder ? undefined : prompt,
-      encoding: "utf8",
-      maxBuffer: 32 * 1024 * 1024,
-    });
+    const timeoutMs = this.spec.timeoutMs ?? 600_000;
+    let reply: string;
+    try {
+      reply = execFileSync(this.spec.command, args, {
+        input: usesPlaceholder ? undefined : prompt,
+        encoding: "utf8",
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+      });
+    } catch (e) {
+      throw classifyExecError(e, this.provider, timeoutMs);
+    }
     return { code: extractStrand(reply), report: `authored by ${this.provider}` };
   }
 }

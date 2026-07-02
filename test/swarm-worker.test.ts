@@ -51,3 +51,79 @@ test("a worker drives a dependency graph green through the green-gate", async ()
   // The assembled namespace actually computes: double depends on add, both landed.
   assert.equal(strand(root, ["eval", "double 21"]).trim(), "42");
 });
+
+// #50: provider failures are classified and the worker reacts per class.
+test("classifyExecError: timeout, missing binary, auth, rate limit, unknown", async () => {
+  const { classifyExecError } = await import("../src/swarm/adapter.ts");
+  const c = (e: object) => classifyExecError(e, "claude", 1000);
+  assert.equal(c({ message: "x", killed: true, signal: "SIGKILL" }).kind, "timeout");
+  assert.equal(c({ message: "x", code: "ETIMEDOUT" }).kind, "timeout");
+  assert.equal(c({ message: "spawn claude ENOENT", code: "ENOENT" }).kind, "permanent");
+  assert.equal(c({ message: "x", stderr: "Error: 401 Unauthorized — invalid API key" }).kind, "permanent");
+  assert.equal(c({ message: "x", stderr: "429 Too Many Requests: rate limit exceeded" }).kind, "transient");
+  assert.equal(c({ message: "x", stderr: "an inscrutable explosion" }).kind, "transient");
+});
+
+test("a hung provider subprocess is killed and reported as a timeout", async () => {
+  const { CliAgent, ProviderError } = await import("../src/swarm/adapter.ts");
+  const agent = new CliAgent({ provider: "sleep", command: "sleep", args: ["30"], timeoutMs: 200 });
+  const ctx = {
+    task: { id: "t", title: "t", role: "code" as const, intent: "i", target: ["x"], deps: [], state: "ready" as const },
+    namespaceSource: "",
+  };
+  try {
+    agent.run(ctx);
+    assert.fail("should have thrown");
+  } catch (e) {
+    assert.ok(e instanceof ProviderError);
+    assert.equal(e.kind, "timeout");
+    assert.match(e.message, /provider timeout/);
+  }
+});
+
+test("transient provider failures back off and burn no attempt; the task still lands", async () => {
+  const { ProviderError } = await import("../src/swarm/adapter.ts");
+  const root = mkdtempSync(join(tmpdir(), "strand-swarm-transient-"));
+  strand(root, ["init"]);
+  const queue = new FileQueue(join(root, ".strand-swarm"));
+  queue.add({ title: "code add", role: "code", intent: "adder", target: ["add"], deps: [] });
+
+  let calls = 0;
+  const flaky: Agent = {
+    provider: "flaky",
+    run(ctx: AgentContext): AgentResult {
+      if (++calls <= 4) throw new ProviderError("transient", "rate limited");
+      return { code: "def add (a: Int) (b: Int) -> Int = a + b", report: "ok" };
+    },
+  };
+
+  // maxAttempts=3 < 4 transient failures: only because transient failures burn
+  // no attempt can the fifth call succeed instead of the task parking.
+  const summary = await work(queue, flaky, { root, workerId: "w1", maxIdlePolls: 2, pollMs: 5, maxAttempts: 3, backoffMs: 1 });
+  assert.equal(summary.done.length, 1, "task landed after transient failures");
+  assert.equal(summary.provider.transient, 4);
+  assert.equal(summary.stopped, undefined);
+});
+
+test("a permanent provider failure stops the worker and hands the task back", async () => {
+  const { ProviderError } = await import("../src/swarm/adapter.ts");
+  const root = mkdtempSync(join(tmpdir(), "strand-swarm-permanent-"));
+  strand(root, ["init"]);
+  const queue = new FileQueue(join(root, ".strand-swarm"));
+  queue.add({ title: "code add", role: "code", intent: "adder", target: ["add"], deps: [] });
+
+  const dead: Agent = {
+    provider: "dead",
+    run(): AgentResult {
+      throw new ProviderError("permanent", "invalid API key");
+    },
+  };
+
+  const summary = await work(queue, dead, { root, workerId: "w1", maxIdlePolls: 2, pollMs: 5 });
+  assert.equal(summary.done.length, 0);
+  assert.equal(summary.provider.permanent, 1);
+  assert.match(summary.stopped ?? "", /invalid API key/);
+  const t = queue.list()[0];
+  assert.equal(t.state, "ready", "task handed back for another worker");
+  assert.equal(t.assignee, null, "task unassigned");
+});
