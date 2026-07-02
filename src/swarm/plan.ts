@@ -1,3 +1,5 @@
+import { record } from "../distributed/memory.ts";
+import { loadRepo, saveRepo } from "../persist.ts";
 import type { Queue, Task } from "./queue.ts";
 
 /** The planner — the one genuinely agentic role, here seeded with a hand-written
@@ -6,12 +8,16 @@ import type { Queue, Task } from "./queue.ts";
  *  parallel and only genuinely-dependent work is serialized. Later this graph is
  *  what `strand partition` (#25) load-balances across agents. */
 
-interface DefSpec {
+export interface DefSpec {
   /** The Strand definition this unit produces. */
   name: string;
   intent: string;
   /** Other definition names this one references. */
   deps: string[];
+  /** Pinned contract (signature + behavior) — recorded as a spec note in the
+   *  swarm's decision memory so every agent building on this name sees the
+   *  same API instead of inventing its own. */
+  spec?: string;
 }
 
 /** Sudoku generator, decomposed. A wide graph — plenty of parallelism for ≥10 agents. */
@@ -31,8 +37,29 @@ export const SUDOKU: DefSpec[] = [
 
 /** Seed a decomposition into the queue: one `code` task per definition, plus one
  *  `test` task per definition that depends on its code task. Dependency edges are
- *  resolved from definition names to the queue ids they were assigned. */
-export function seed(queue: Queue, defs: DefSpec[] = SUDOKU): Task[] {
+ *  resolved from definition names to the queue ids they were assigned.
+ *
+ *  With a `root`, pinned specs land as spec notes in the repo's decision memory
+ *  before any worker runs — the contract plane the agents author against. */
+export function seed(queue: Queue, defs: DefSpec[] = SUDOKU, root?: string): Task[] {
+  if (root) {
+    const repo = loadRepo(root);
+    for (const d of defs) {
+      if (!d.spec) continue;
+      repo.memory = record(repo.memory, {
+        type: "spec",
+        subject: d.name,
+        body: d.spec,
+        by: "planner",
+        targets: [d.name],
+      });
+    }
+    saveRepo(root, repo);
+  }
+  return seedTasks(queue, defs);
+}
+
+function seedTasks(queue: Queue, defs: DefSpec[]): Task[] {
   const codeIdByName = new Map<string, string>();
   const created: Task[] = [];
 
