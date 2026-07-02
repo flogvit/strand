@@ -89,6 +89,28 @@ test("an agent's `# assume:` line lands as a first-class assumption note", async
   assert.equal(assumption!.by, "w1");
 });
 
+test("a retry sees the previous green-gate error in its context", async () => {
+  const root = fresh();
+  const queue = new FileQueue(join(root, ".strand-swarm"));
+  queue.add({ title: "code add", role: "code", intent: "adder", target: ["add"], deps: [] });
+
+  // first attempt references an unknown name; the second is clean
+  let calls = 0;
+  const agent: Agent = {
+    provider: "fake",
+    run(ctx: AgentContext): AgentResult {
+      calls++;
+      if (calls === 1) return { code: "def add (a: Int) (b: Int) -> Int = a + nosuch b", report: "bad" };
+      assert.ok(ctx.feedback, "the retry carries feedback");
+      assert.match(ctx.feedback!, /nosuch/, "the actual compiler error reaches the agent");
+      return { code: "def add (a: Int) (b: Int) -> Int = a + b", report: "good" };
+    },
+  };
+  const summary = await work(queue, agent, { root, workerId: "w1", maxIdlePolls: 1, pollMs: 0 });
+  assert.equal(calls, 2);
+  assert.equal(summary.done.length, 1, "the corrected retry landed");
+});
+
 test("a worker steers away from a hot name another agent is actively on", async () => {
   const root = fresh();
   // `valid` is hot: three definitions depend on it (fan-in 3)

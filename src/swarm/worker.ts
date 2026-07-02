@@ -90,8 +90,16 @@ function landed(root: string, names: string[]): boolean {
   });
 }
 
+/** The gate's actual complaint — the subprocess stderr when present (that is
+ *  where the compiler writes), else the exec error's first line. */
+function gateError(e: unknown): string {
+  const err = e as Error & { stderr?: string };
+  const stderr = err.stderr?.trim();
+  return stderr || err.message.split("\n")[0];
+}
+
 /** Run one task through the full loop. Returns the state to report back. */
-function attempt(root: string, workerId: string, agent: Agent, task: Task, notes: Note[]): {
+function attempt(root: string, workerId: string, agent: Agent, task: Task, notes: Note[], feedback?: string): {
   state: "done" | "ready";
   comment: string;
   assumptions: string[];
@@ -104,7 +112,7 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
     }
   })();
 
-  const result = agent.run({ task, namespaceSource, notes });
+  const result = agent.run({ task, namespaceSource, notes, feedback });
   const assumptions = assumptionsOf(result.code);
   if (!result.code.trim()) return { state: "ready", comment: "empty agent output", assumptions };
 
@@ -116,7 +124,7 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
     strand(root, ["merge"]);
   } catch (e) {
     // The green-gate rejected it — park for a retry, don't corrupt the store.
-    return { state: "ready", comment: `green-gate rejected: ${(e as Error).message.split("\n")[0]}`, assumptions };
+    return { state: "ready", comment: `green-gate rejected: ${gateError(e)}`, assumptions };
   }
 
   if (!landed(root, defNames(result.code))) {
@@ -129,6 +137,7 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
   const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3 } = opts;
   const summary: WorkSummary = { workerId, done: [], parked: [] };
   const attempts = new Map<string, number>();
+  const lastFailure = new Map<string, string>();
   let idle = 0;
 
   while (idle < maxIdlePolls) {
@@ -171,10 +180,11 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
 
     let outcome: { state: "done" | "ready"; comment: string; assumptions: string[] };
     try {
-      outcome = attempt(root, workerId, agent, task, notes);
+      outcome = attempt(root, workerId, agent, task, notes, lastFailure.get(task.id));
     } catch (e) {
       outcome = { state: "ready", comment: `worker error: ${(e as Error).message.split("\n")[0]}`, assumptions: [] };
     }
+    if (outcome.state !== "done") lastFailure.set(task.id, outcome.comment);
 
     if (outcome.state === "done") {
       // decisions the agent took under ambiguity become first-class memory —

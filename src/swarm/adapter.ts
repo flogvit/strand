@@ -16,6 +16,9 @@ export interface AgentContext {
    *  spec notes) — read from the swarm's decision memory so agents don't diverge
    *  on choices that are not enforced by the types. */
   notes?: Note[];
+  /** Why the previous attempt at this task failed (the green-gate's actual
+   *  error), so a retry corrects the mistake instead of repeating it. */
+  feedback?: string;
 }
 
 export interface AgentResult {
@@ -34,7 +37,7 @@ export interface Agent {
  *  neutral: describe the job, show the existing namespace, demand a single Strand
  *  code block back. The green-gate — not the prompt — is what guarantees correctness. */
 export function buildPrompt(ctx: AgentContext): string {
-  const { task, namespaceSource, notes = [] } = ctx;
+  const { task, namespaceSource, notes = [], feedback } = ctx;
   const job =
     task.role === "test"
       ? `Write Strand test definitions (zero-arg Bool defs) that exercise: ${task.target.join(", ")}.`
@@ -65,7 +68,9 @@ export function buildPrompt(ctx: AgentContext): string {
     `f x y                                            # application by juxtaposition; partial application works`,
     "```",
     `Types: Int, Bool, Text, declared data types, functions (a -> b). Operators: + - * / == != < <= > >= && ||.`,
+    `Literals: integers, "text", and lowercase true / false (NOT True/False).`,
     `Recursion is allowed. There are no lambdas — name helper defs instead. No imports; only the namespace below.`,
+    ...(feedback ? [``, `Your previous attempt was rejected by the type-checker. Fix exactly this:`, feedback] : []),
     ``,
     `The current namespace (build on these; reference them by name):`,
     "```strand",
