@@ -41,6 +41,10 @@ const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestratio
                                                     gossiping with the given peers
   strand-swarm status [--queue <dir> | --gh <owner/repo>]
                                                     show the task board
+  strand-swarm coverage [--root <dir>] [--queue <dir> | --gh <owner/repo>] [--require]
+                                                    open a test task per untested definition
+                                                    (--require also gates each on 'tests'
+                                                    so strand verify becomes the hard gate)
 
   providers: claude | codex | gemini
   queues:    a local dir (default) or GitHub issues via --gh — the shared board
@@ -88,6 +92,49 @@ async function main(argv: string[]): Promise<number> {
         console.error(`${workerId} stopped early: ${summary.stopped}`);
         return 1;
       }
+      return 0;
+    }
+
+    case "coverage": {
+      // #41: the coverage loop. The swarm's own byproducts (agent-invented
+      // helpers no planner ever named) come under test without a human
+      // noticing them first: every untested definition becomes a test task.
+      const { loadRepo, saveRepo } = await import("../persist.ts");
+      const { untestedOf } = await import("../project.ts");
+      const repo = loadRepo(root);
+      const untested = untestedOf(repo.namespace, repo.store);
+      if (untested.length === 0) {
+        console.log("all definitions are covered by a test — nothing to seed");
+        return 0;
+      }
+      const existing = new Set(
+        queue.list().filter((t) => t.role === "test").flatMap((t) => t.target),
+      );
+      let opened = 0;
+      for (const name of untested) {
+        if (existing.has(name)) continue;
+        queue.add({
+          title: `test ${name}`,
+          role: "test",
+          intent: `coverage: verify ${name} (opened by the coverage loop, no test reaches it)`,
+          target: [name],
+          helperPrefix: name,
+          deps: [],
+        });
+        opened++;
+        if (opts.require) {
+          const b = repo.namespace.get(name)!;
+          const req = new Set([...(b.requires ?? []), "tests"]);
+          b.requires = [...req];
+          repo.namespace.set(name, b);
+        }
+      }
+      if (opts.require) saveRepo(root, repo);
+      console.log(
+        `coverage: ${untested.length} untested definition(s), opened ${opened} test task(s)` +
+          (untested.length - opened > 0 ? ` (${untested.length - opened} already queued)` : "") +
+          (opts.require ? ", each now requires 'tests'" : ""),
+      );
       return 0;
     }
 

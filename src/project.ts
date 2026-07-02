@@ -87,6 +87,30 @@ function renderTerm(t: CoreTerm, nameOf: Map<Hash, string>, ctx: number, selfNam
   return p < ctx ? `(${s})` : s;
 }
 
+/** Definitions no test reaches: covered = the transitive dependency closure of
+ *  the test defs (zero-arg Bool). The swarm's coverage loop (#41) and `strand
+ *  untested` share this so they can never disagree. */
+export function untestedOf(namespace: Namespace, store: Store): string[] {
+  const valueDefs = [...namespace].filter(([, b]) => store.defOf(b.hash));
+  const isTest = (h: Hash): boolean => {
+    const def = store.defOf(h);
+    const ty = store.typeOf(h);
+    return !!def && def.params.length === 0 && ty?.tag === "Bool";
+  };
+  const reachable = new Set<Hash>();
+  const visit = (h: Hash): void => {
+    if (reachable.has(h)) return;
+    reachable.add(h);
+    const def = store.defOf(h);
+    if (def) for (const d of depsOf(def.body)) visit(d);
+  };
+  for (const [, b] of valueDefs) if (isTest(b.hash)) visit(b.hash);
+  return valueDefs
+    .filter(([, b]) => !reachable.has(b.hash) && !isTest(b.hash))
+    .map(([n]) => n)
+    .sort();
+}
+
 export function namesOf(namespace: Namespace): Map<Hash, string> {
   const m = new Map<Hash, string>();
   for (const [name, b] of namespace) m.set(b.hash, name);

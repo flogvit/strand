@@ -8,7 +8,7 @@ import { printProgram } from "./syntax/print.ts";
 import { depsOf } from "./core/term.ts";
 import { mergeRepo, resolveRepo } from "./repo.ts";
 import { typecheckNamespace } from "./core/check.ts";
-import { exportNamespace, namesOf, projectNamespace, renderDef } from "./project.ts";
+import { exportNamespace, namesOf, projectNamespace, renderDef, untestedOf } from "./project.ts";
 import { emitModule } from "./backend/emit_ts.ts";
 import { valueToString } from "./core/eval.ts";
 import { initRepo, loadRepo, repoExists, saveRepo } from "./persist.ts";
@@ -361,25 +361,7 @@ function main(argv: string[]): number {
     case "untested": {
       requireRepo(root);
       const repo = loadRepo(root);
-      const valueDefs = [...repo.namespace].filter(([, b]) => repo.store.defOf(b.hash));
-      const isTest = (h: Hash): boolean => {
-        const def = repo.store.defOf(h);
-        const ty = repo.store.typeOf(h);
-        return !!def && def.params.length === 0 && ty?.tag === "Bool";
-      };
-      // covered = the transitive dependency closure of the test definitions
-      const reachable = new Set<Hash>();
-      const visit = (h: Hash): void => {
-        if (reachable.has(h)) return;
-        reachable.add(h);
-        const def = repo.store.defOf(h);
-        if (def) for (const d of depsOf(def.body)) visit(d);
-      };
-      for (const [, b] of valueDefs) if (isTest(b.hash)) visit(b.hash);
-      const untested = valueDefs
-        .filter(([, b]) => !reachable.has(b.hash) && !isTest(b.hash))
-        .map(([n]) => n)
-        .sort();
+      const untested = untestedOf(repo.namespace, repo.store);
       if (untested.length === 0) console.log("all definitions are covered by a test");
       else console.log("untested:\n" + untested.map((n) => `  ${n}`).join("\n"));
       return 0;
