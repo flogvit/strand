@@ -3,6 +3,12 @@ import { join } from "node:path";
 import { Store, type StoredItem } from "./core/store.ts";
 import type { Hash } from "./core/term.ts";
 import type { Binding, Conflict, Namespace, PendingTx } from "./model.ts";
+import * as crdt from "./distributed/crdt.ts";
+import * as hints from "./distributed/hints.ts";
+import * as memory from "./distributed/memory.ts";
+import type { CrdtNamespace, NameState } from "./distributed/crdt.ts";
+import type { Hints, Intent } from "./distributed/hints.ts";
+import type { Memory, Note } from "./distributed/memory.ts";
 
 const DIR = ".strand";
 
@@ -24,6 +30,13 @@ export interface RepoState {
   attestations: Record<Hash, string[]>;
   /** Every applied binding, in order — the messy work plane that `distill` reads. */
   history: HistoryEntry[];
+  /** The distributed plane. The CRDT namespace is the source of truth the peers
+   *  join on; `namespace` above is its resolved view, kept for readability. */
+  crdt: CrdtNamespace;
+  /** Advisory soft-claim hints — gossiped CRDT state, never a lock. */
+  hints: Hints;
+  /** Swarm decision memory: conventions, assumptions, rejected alternatives. */
+  memory: Memory;
 }
 
 function paths(root: string) {
@@ -36,6 +49,9 @@ function paths(root: string) {
     conflicts: join(d, "conflicts.json"),
     attestations: join(d, "attestations.json"),
     history: join(d, "history.json"),
+    crdt: join(d, "crdt.json"),
+    hints: join(d, "hints.json"),
+    memory: join(d, "memory.json"),
   };
 }
 
@@ -54,7 +70,17 @@ export function repoExists(root: string): boolean {
 
 export function initRepo(root: string): RepoState {
   mkdirSync(paths(root).dir, { recursive: true });
-  const state: RepoState = { store: new Store(), namespace: new Map(), pending: [], conflicts: [], attestations: {}, history: [] };
+  const state: RepoState = {
+    store: new Store(),
+    namespace: new Map(),
+    pending: [],
+    conflicts: [],
+    attestations: {},
+    history: [],
+    crdt: crdt.emptyNamespace(),
+    hints: hints.emptyHints(),
+    memory: memory.emptyMemory(),
+  };
   saveRepo(root, state);
   return state;
 }
@@ -68,7 +94,15 @@ export function loadRepo(root: string): RepoState {
   const conflicts = readJSON<Conflict[]>(p.conflicts, []);
   const attestations = readJSON<Record<Hash, string[]>>(p.attestations, {});
   const history = readJSON<HistoryEntry[]>(p.history, []);
-  return { store, namespace, pending, conflicts, attestations, history };
+  // A repo written before the distributed plane existed has no crdt.json: lift
+  // its resolved namespace into CRDT state (one observation per binding) so it
+  // can join the gossip like any other peer.
+  const crdtState = existsSync(p.crdt)
+    ? crdt.fromJSON(readJSON<Record<string, NameState>>(p.crdt, {}))
+    : crdt.fromNamespace(namespace);
+  const hintState = hints.fromJSON(readJSON<Record<string, Intent>>(p.hints, {}));
+  const memoryState = memory.fromJSON(readJSON<Record<string, Note>>(p.memory, {}));
+  return { store, namespace, pending, conflicts, attestations, history, crdt: crdtState, hints: hintState, memory: memoryState };
 }
 
 export function saveRepo(root: string, state: RepoState): void {
@@ -79,4 +113,7 @@ export function saveRepo(root: string, state: RepoState): void {
   writeJSON(p.conflicts, state.conflicts);
   writeJSON(p.attestations, state.attestations);
   writeJSON(p.history, state.history);
+  writeJSON(p.crdt, crdt.toJSON(state.crdt));
+  writeJSON(p.hints, hints.toJSON(state.hints));
+  writeJSON(p.memory, memory.toJSON(state.memory));
 }

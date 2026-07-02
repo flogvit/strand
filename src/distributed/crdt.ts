@@ -67,10 +67,11 @@ export function join(a: CrdtNamespace, b: CrdtNamespace): CrdtNamespace {
   for (const name of new Set([...a.keys(), ...b.keys()])) {
     const sa = a.get(name);
     const sb = b.get(name);
-    out.set(name, {
-      obs: mergeObs(sa?.obs ?? [], sb?.obs ?? []),
-      resolution: joinResolution(sa?.resolution, sb?.resolution),
-    });
+    const obs = mergeObs(sa?.obs ?? [], sb?.obs ?? []);
+    const resolution = joinResolution(sa?.resolution, sb?.resolution);
+    // omit an absent resolution (rather than storing `undefined`) so the state
+    // is canonical: it round-trips through JSON unchanged.
+    out.set(name, resolution ? { obs, resolution } : { obs });
   }
   return out;
 }
