@@ -8,6 +8,9 @@
     "type": "git",
     "url": "git+https://github.com/flogvit/strand.git"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "keywords": [
     "content-addressed",
     "crdt",

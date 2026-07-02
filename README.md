@@ -227,6 +227,12 @@ person safely run very many agents on one codebase.** The roadmap lives in the
 [issue tracker](https://github.com/flogvit/strand/issues) — closed issues are
 the honest build log.
 
+## Contributing
+
+The roadmap is the [issue tracker](https://github.com/flogvit/strand/issues)
+(Gap / Do / Why); tests come first and the suite stays green — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 [MIT](LICENSE)
