@@ -20,6 +20,9 @@ export interface Task {
   target: string[];
   /** Task ids that must be `done` before this one is claimable. */
   deps: string[];
+  /** Planner-assigned helper namespace (#52): when set, every def this task
+   *  produces must be the target or carry this prefix, enforced by the worker. */
+  helperPrefix?: string;
   state: TaskState;
   assignee: string | null;
 }
@@ -100,6 +103,7 @@ export class FileQueue implements Queue {
         intent: spec.intent,
         target: spec.target,
         deps: spec.deps,
+        ...(spec.helperPrefix ? { helperPrefix: spec.helperPrefix } : {}),
         state: spec.state ?? "ready",
         assignee: null,
       };

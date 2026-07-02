@@ -21,6 +21,10 @@ export interface DefSpec {
   /** Set false to skip the test task — for defs an external oracle verifies
    *  (a fabricated duplicate-literal test would add nothing). Default true. */
   test?: boolean;
+  /** Helper namespace for this task (#52). When set, the worker mechanically
+   *  rejects any def that is not the target and not carrying this prefix,
+   *  so helper names are namespaced by construction, not prompt discipline. */
+  helperPrefix?: string;
 }
 
 /** Sudoku generator, decomposed. A wide graph — plenty of parallelism for ≥10 agents. */
@@ -38,12 +42,23 @@ export const SUDOKU: DefSpec[] = [
   { name: "generate", intent: "driver: full board -> dug puzzle", deps: ["dig"] },
 ];
 
+/** The helper-naming convention pinned into every decomposition (#52): agents
+ *  invent helper defs the planner never named, and at swarm width two agents
+ *  independently writing `go` or `aux` is a certainty — every collision parks
+ *  a name no one semantically contends over. Prefixing helpers with their
+ *  parent's name namespaces them by convention. */
+export const HELPER_NAMING =
+  "Helper definitions you invent must be prefixed with the definition they serve: " +
+  "for a task targeting `solve`, write `solveTry`, `solveStep` — never bare `go`, `aux`, `loop`, `step`. " +
+  "Another agent inventing the same bare name would force a needless conflict.";
+
 /** Seed a decomposition into the queue: one `code` task per definition, plus one
  *  `test` task per definition that depends on its code task. Dependency edges are
  *  resolved from definition names to the queue ids they were assigned.
  *
  *  With a `root`, pinned specs land as spec notes in the repo's decision memory
- *  before any worker runs — the contract plane the agents author against. */
+ *  before any worker runs — the contract plane the agents author against — and
+ *  the helper-naming convention (#52) is pinned across all seeded names. */
 export function seed(queue: Queue, defs: DefSpec[] = SUDOKU, root?: string): Task[] {
   if (root) {
     const repo = loadRepo(root);
@@ -57,6 +72,13 @@ export function seed(queue: Queue, defs: DefSpec[] = SUDOKU, root?: string): Tas
         targets: [d.name],
       });
     }
+    repo.memory = record(repo.memory, {
+      type: "convention",
+      subject: "helper naming",
+      body: HELPER_NAMING,
+      by: "planner",
+      targets: defs.map((d) => d.name),
+    });
     saveRepo(root, repo);
   }
   return seedTasks(queue, defs);
@@ -72,6 +94,7 @@ function seedTasks(queue: Queue, defs: DefSpec[]): Task[] {
       role: "code",
       intent: d.intent,
       target: [d.name],
+      ...(d.helperPrefix ? { helperPrefix: d.helperPrefix } : {}),
       deps: d.deps.map((n) => {
         const id = codeIdByName.get(n);
         if (!id) throw new Error(`'${d.name}' depends on '${n}', which is not defined earlier`);
@@ -90,6 +113,7 @@ function seedTasks(queue: Queue, defs: DefSpec[]): Task[] {
         role: "test",
         intent: `verify ${d.name}`,
         target: [d.name],
+        ...(d.helperPrefix ? { helperPrefix: d.helperPrefix } : {}),
         deps: [codeIdByName.get(d.name)!],
       }),
     );

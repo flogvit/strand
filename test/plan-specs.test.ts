@@ -33,12 +33,14 @@ test("seeding with a root records pinned specs as decision-memory notes", () => 
 
   const repo = loadRepo(root);
   const tagNotes = forTarget(repo.memory, "tag");
-  assert.equal(tagNotes.length, 1);
-  assert.equal(tagNotes[0].type, "spec");
-  assert.match(tagNotes[0].body, /Text -> Text -> Text -> Text/);
+  assert.equal(tagNotes.length, 2, "pinned spec + the helper-naming convention (#52)");
+  const spec = tagNotes.find((n) => n.type === "spec")!;
+  assert.match(spec.body, /Text -> Text -> Text -> Text/);
+  assert.ok(tagNotes.some((n) => n.type === "convention" && n.subject === "helper naming"));
 
   const heroNotes = forTarget(repo.memory, "hero");
-  assert.equal(heroNotes.length, 0, "no spec pinned, no note fabricated");
+  assert.equal(heroNotes.length, 1, "no spec fabricated — only the naming convention");
+  assert.equal(heroNotes[0].type, "convention");
 });
 
 test("seeding without a root behaves exactly as before", () => {

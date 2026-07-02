@@ -65,6 +65,23 @@ function assumptionsOf(code: string): string[] {
   return [...code.matchAll(/^\s*#\s*assume:\s*(.+)$/gm)].map((m) => m[1].trim());
 }
 
+/** #52: when the planner assigned a helper namespace, every def this task
+ *  produces must be a target or carry the prefix (solveTry, tst_solveBasic) —
+ *  enforced here, mechanically, before the submit, so agent-invented helpers
+ *  can never park a name nobody semantically owns. Tasks without a prefix
+ *  (abstract-label decompositions) keep the old behavior. */
+function offConvention(code: string, task: Task): string[] {
+  const prefix = task.helperPrefix;
+  if (!prefix) return [];
+  const p = prefix.toLowerCase();
+  const ok = (name: string): boolean => {
+    if (task.target.includes(name)) return true;
+    const n = name.toLowerCase();
+    return n.startsWith(p) || n.startsWith(`tst_${p}`);
+  };
+  return defNames(code).filter((n) => !ok(n));
+}
+
 /** How many other definitions depend on `name` — the partitioner's fan-in
  *  centrality, computed against the live namespace. Hot names are the ones
  *  worth consulting hints for; a name not yet bound is cold by definition. */
@@ -122,6 +139,15 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
   const result = agent.run({ task, namespaceSource, notes, feedback });
   const assumptions = assumptionsOf(result.code);
   if (!result.code.trim()) return { state: "ready", comment: "empty agent output", assumptions };
+
+  const offenders = offConvention(result.code, task);
+  if (offenders.length > 0) {
+    return {
+      state: "ready",
+      comment: `helper naming convention violated: ${offenders.join(", ")} — every def must be a target (${task.target.join(", ")}) or prefixed with '${task.helperPrefix}'`,
+      assumptions,
+    };
+  }
 
   const file = join(mkdtempSync(join(tmpdir(), "strand-work-")), "work.strand");
   writeFileSync(file, result.code);

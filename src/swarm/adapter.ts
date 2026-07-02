@@ -42,6 +42,16 @@ export function buildPrompt(ctx: AgentContext): string {
     task.role === "test"
       ? `Write Strand test definitions (zero-arg Bool defs) that exercise: ${task.target.join(", ")}.`
       : `Write the Strand definition(s) for: ${task.target.join(", ")}.`;
+  // #52: helper names are namespaced by their parent, so two agents' private
+  // helpers can never park a name neither of them semantically owns. With a
+  // planner-assigned prefix the rule is also enforced mechanically by the worker.
+  const prefix = task.helperPrefix ?? task.target[0];
+  const naming =
+    task.role === "test"
+      ? `Name every test definition with the prefix tst_${prefix}… (e.g. tst_${prefix}Basic).` +
+        (task.helperPrefix ? ` This is enforced: any def outside tst_${prefix}…/${prefix}… is rejected.` : "")
+      : `Prefix any helper definitions you invent with the definition they serve (e.g. ${prefix}Step, ${prefix}Go). Never bare names like go, aux, loop — another agent will invent the same one.` +
+        (task.helperPrefix ? ` This is enforced: any def that is not a target and not prefixed with ${prefix} is rejected.` : "");
   const decisions =
     notes.length === 0
       ? []
@@ -55,6 +65,7 @@ export function buildPrompt(ctx: AgentContext): string {
     `Task: ${task.title}`,
     `Intent: ${task.intent}`,
     job,
+    naming,
     ...decisions,
     ``,
     `Strand syntax — the complete surface; use nothing beyond it:`,

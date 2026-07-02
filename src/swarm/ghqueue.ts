@@ -44,7 +44,9 @@ function realRunner(repo: string): GhRunner {
 }
 
 function bodyOf(spec: TaskSpec): string {
-  return [`intent: ${spec.intent}`, `target: ${spec.target.join(",")}`, `deps: ${spec.deps.join(",")}`].join("\n");
+  const lines = [`intent: ${spec.intent}`, `target: ${spec.target.join(",")}`, `deps: ${spec.deps.join(",")}`];
+  if (spec.helperPrefix) lines.push(`prefix: ${spec.helperPrefix}`);
+  return lines.join("\n");
 }
 
 function fieldOf(body: string, key: string): string {
@@ -87,6 +89,7 @@ export class GhQueue implements Queue {
       intent: fieldOf(issue.body, "intent"),
       target: csv(fieldOf(issue.body, "target")),
       deps: csv(fieldOf(issue.body, "deps")),
+      ...(fieldOf(issue.body, "prefix") ? { helperPrefix: fieldOf(issue.body, "prefix") } : {}),
       state,
       assignee: issue.assignees[0]?.login ?? null,
     };
@@ -120,6 +123,7 @@ export class GhQueue implements Queue {
       intent: spec.intent,
       target: spec.target,
       deps: spec.deps,
+      ...(spec.helperPrefix ? { helperPrefix: spec.helperPrefix } : {}),
       state: spec.state ?? "ready",
       assignee: null,
     };

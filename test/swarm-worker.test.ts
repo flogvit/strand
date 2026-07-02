@@ -127,3 +127,32 @@ test("a permanent provider failure stops the worker and hands the task back", as
   assert.equal(t.state, "ready", "task handed back for another worker");
   assert.equal(t.assignee, null, "task unassigned");
 });
+
+// #52: a planner-assigned helper prefix is enforced mechanically before submit.
+test("helperPrefix: unprefixed helpers are rejected with feedback; prefixed ones land", async () => {
+  const root = mkdtempSync(join(tmpdir(), "strand-swarm-prefix-"));
+  strand(root, ["init"]);
+  const queue = new FileQueue(join(root, ".strand-swarm"));
+  queue.add({ title: "code sortBy", role: "code", intent: "sorter", target: ["sortBy"], deps: [], helperPrefix: "sortBy" });
+
+  let sawFeedback = "";
+  let calls = 0;
+  const agent: Agent = {
+    provider: "fake",
+    run(ctx: AgentContext): AgentResult {
+      calls++;
+      sawFeedback = ctx.feedback ?? "";
+      if (calls === 1) {
+        // invents a bare helper the planner never named — must be rejected
+        return { code: "def go (n: Int) -> Int = n\ndef sortBy (n: Int) -> Int = go n", report: "bad" };
+      }
+      return { code: "def sortByGo (n: Int) -> Int = n\ndef sortBy (n: Int) -> Int = sortByGo n", report: "good" };
+    },
+  };
+
+  const summary = await work(queue, agent, { root, workerId: "w1", maxIdlePolls: 2, pollMs: 5 });
+  assert.equal(summary.done.length, 1, "task landed on the corrected attempt");
+  assert.match(sawFeedback, /naming convention violated: go/);
+  // the bare helper never reached the store
+  assert.throws(() => strand(root, ["show", "go"]));
+});
