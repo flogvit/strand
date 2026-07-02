@@ -3,7 +3,11 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { depsOf } from "../core/term.ts";
+import { announce, shouldAvoid, shouldConsult } from "../distributed/hints.ts";
+import { forTarget, record, type Note } from "../distributed/memory.ts";
 import { gossipOnce } from "../distributed/transport.ts";
+import { loadRepo, saveRepo, type RepoState } from "../persist.ts";
 import type { Agent } from "./adapter.ts";
 import type { Queue, Task } from "./queue.ts";
 
@@ -48,6 +52,33 @@ function defNames(code: string): string[] {
   return [...code.matchAll(/^\s*def\s+([A-Za-z_]\w*)/gm)].map((m) => m[1]);
 }
 
+/** Assumptions the agent recorded instead of stopping to ask — `# assume: ...`
+ *  comment lines inside the returned code block. */
+function assumptionsOf(code: string): string[] {
+  return [...code.matchAll(/^\s*#\s*assume:\s*(.+)$/gm)].map((m) => m[1].trim());
+}
+
+/** How many other definitions depend on `name` — the partitioner's fan-in
+ *  centrality, computed against the live namespace. Hot names are the ones
+ *  worth consulting hints for; a name not yet bound is cold by definition. */
+function fanIn(repo: RepoState, name: string): number {
+  const target = repo.namespace.get(name);
+  if (!target) return 0;
+  let n = 0;
+  for (const [other, b] of repo.namespace) {
+    if (other === name) continue;
+    const def = repo.store.defOf(b.hash);
+    if (def && depsOf(def.body).includes(target.hash)) n++;
+  }
+  return n;
+}
+
+/** Logical time for hints: the merge history length — monotone, shared via
+ *  gossip, and no wall clock to disagree about across machines. */
+const logicalNow = (repo: RepoState): number => repo.history.length;
+
+const HINT_TTL = 10;
+
 function landed(root: string, names: string[]): boolean {
   return names.every((name) => {
     try {
@@ -60,9 +91,10 @@ function landed(root: string, names: string[]): boolean {
 }
 
 /** Run one task through the full loop. Returns the state to report back. */
-function attempt(root: string, workerId: string, agent: Agent, task: Task): {
+function attempt(root: string, workerId: string, agent: Agent, task: Task, notes: Note[]): {
   state: "done" | "ready";
   comment: string;
+  assumptions: string[];
 } {
   const namespaceSource = (() => {
     try {
@@ -72,8 +104,9 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task): {
     }
   })();
 
-  const result = agent.run({ task, namespaceSource });
-  if (!result.code.trim()) return { state: "ready", comment: "empty agent output" };
+  const result = agent.run({ task, namespaceSource, notes });
+  const assumptions = assumptionsOf(result.code);
+  if (!result.code.trim()) return { state: "ready", comment: "empty agent output", assumptions };
 
   const file = join(mkdtempSync(join(tmpdir(), "strand-work-")), "work.strand");
   writeFileSync(file, result.code);
@@ -83,13 +116,13 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task): {
     strand(root, ["merge"]);
   } catch (e) {
     // The green-gate rejected it — park for a retry, don't corrupt the store.
-    return { state: "ready", comment: `green-gate rejected: ${(e as Error).message.split("\n")[0]}` };
+    return { state: "ready", comment: `green-gate rejected: ${(e as Error).message.split("\n")[0]}`, assumptions };
   }
 
   if (!landed(root, defNames(result.code))) {
-    return { state: "ready", comment: "submitted but a definition did not land (likely parked as a name conflict)" };
+    return { state: "ready", comment: "submitted but a definition did not land (likely parked as a name conflict)", assumptions };
   }
-  return { state: "done", comment: result.report };
+  return { state: "done", comment: result.report, assumptions };
 }
 
 export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Promise<WorkSummary> {
@@ -113,14 +146,52 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
     const tries = (attempts.get(task.id) ?? 0) + 1;
     attempts.set(task.id, tries);
 
-    let outcome: { state: "done" | "ready"; comment: string };
+    // the coordination plane: steer around hot names another agent is actively
+    // on (soft — never a lock), announce our own intent on hot targets, and
+    // collect the decisions governing this work for the agent's prompt
+    const repo = loadRepo(root);
+    const now = logicalNow(repo);
+    const busy = task.target.filter((t) => shouldAvoid(repo.hints, t, fanIn(repo, t), now, workerId));
+    if (busy.length > 0) {
+      const state = tries >= maxAttempts ? "parked" : "ready";
+      queue.report(task.id, { state, unassign: true, comment: `steered away: ${busy.join(", ")} actively claimed elsewhere (soft hint)` });
+      summary.parked.push(task.id);
+      continue;
+    }
+    let announced = false;
+    for (const t of task.target) {
+      if (!shouldConsult(fanIn(repo, t))) continue;
+      repo.hints = announce(repo.hints, t, workerId, now, now + HINT_TTL);
+      announced = true;
+    }
+    if (announced) saveRepo(root, repo);
+    const notes = [...new Map(
+      [...task.target, task.id].flatMap((t) => forTarget(repo.memory, t)).map((n) => [n.id, n]),
+    ).values()];
+
+    let outcome: { state: "done" | "ready"; comment: string; assumptions: string[] };
     try {
-      outcome = attempt(root, workerId, agent, task);
+      outcome = attempt(root, workerId, agent, task, notes);
     } catch (e) {
-      outcome = { state: "ready", comment: `worker error: ${(e as Error).message.split("\n")[0]}` };
+      outcome = { state: "ready", comment: `worker error: ${(e as Error).message.split("\n")[0]}`, assumptions: [] };
     }
 
     if (outcome.state === "done") {
+      // decisions the agent took under ambiguity become first-class memory —
+      // recorded instead of asked, reviewable later on the narrative plane
+      if (outcome.assumptions.length > 0) {
+        const after = loadRepo(root);
+        for (const a of outcome.assumptions) {
+          after.memory = record(after.memory, {
+            type: "assumption",
+            subject: task.title,
+            body: a,
+            by: workerId,
+            targets: [...task.target, task.id],
+          });
+        }
+        saveRepo(root, after);
+      }
       queue.report(task.id, { state: "done", comment: outcome.comment });
       summary.done.push(task.id);
     } else {

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import type { Note } from "../distributed/memory.ts";
 import type { Task } from "./queue.ts";
 
 /** The provider-agnostic agent layer. An "agent" is abstract: under it can be
@@ -11,6 +12,10 @@ export interface AgentContext {
   task: Task;
   /** The current namespace as Strand source, so the agent builds on existing defs. */
   namespaceSource: string;
+  /** The live decisions governing this task's targets (conventions, assumptions,
+   *  spec notes) — read from the swarm's decision memory so agents don't diverge
+   *  on choices that are not enforced by the types. */
+  notes?: Note[];
 }
 
 export interface AgentResult {
@@ -29,16 +34,38 @@ export interface Agent {
  *  neutral: describe the job, show the existing namespace, demand a single Strand
  *  code block back. The green-gate — not the prompt — is what guarantees correctness. */
 export function buildPrompt(ctx: AgentContext): string {
-  const { task, namespaceSource } = ctx;
+  const { task, namespaceSource, notes = [] } = ctx;
   const job =
     task.role === "test"
       ? `Write Strand test definitions (zero-arg Bool defs) that exercise: ${task.target.join(", ")}.`
       : `Write the Strand definition(s) for: ${task.target.join(", ")}.`;
+  const decisions =
+    notes.length === 0
+      ? []
+      : [
+          ``,
+          `Decisions already made for this work — follow them, do not re-decide:`,
+          ...notes.map((n) => `- [${n.type}] ${n.subject}: ${n.body}`),
+        ];
   return [
     `You are authoring in Strand, a small typed functional language that transpiles to TypeScript.`,
     `Task: ${task.title}`,
     `Intent: ${task.intent}`,
     job,
+    ...decisions,
+    ``,
+    `Strand syntax — the complete surface; use nothing beyond it:`,
+    "```",
+    `# a line comment`,
+    `def name (p: Int) (q: Bool) -> Int = expr        # a definition (types required)`,
+    `def tst_name -> Bool = expr                      # a test: zero params, returns Bool`,
+    `data Shape a = Point | Circle a (List a)         # an algebraic data type`,
+    `match xs { Nil -> 0 | Cons h t -> 1 + length t } # pattern match (constructors, literals, _)`,
+    `if cond then a else b`,
+    `f x y                                            # application by juxtaposition; partial application works`,
+    "```",
+    `Types: Int, Bool, Text, declared data types, functions (a -> b). Operators: + - * / == != < <= > >= && ||.`,
+    `Recursion is allowed. There are no lambdas — name helper defs instead. No imports; only the namespace below.`,
     ``,
     `The current namespace (build on these; reference them by name):`,
     "```strand",
@@ -47,6 +74,8 @@ export function buildPrompt(ctx: AgentContext): string {
     ``,
     `Reply with exactly one \`\`\`strand code block containing only the new definition(s).`,
     `No prose outside the code block. It must type-check on its own against the namespace above.`,
+    `If the task is ambiguous, do not ask — pick the most reasonable interpretation and record it`,
+    `inside the code block as a comment line: # assume: <what you assumed and why>`,
   ].join("\n");
 }
 
