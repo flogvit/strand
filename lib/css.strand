@@ -1,0 +1,61 @@
+# Strand css — tokens and component-scoped styles through the gate (#48).
+#
+# A stylesheet is data, not one giant Text literal: rules are lists of typed
+# declarations, design tokens are ordinary defs the gate checks by name, and
+# each component ships its own `List Rule` — so style authoring parallelizes
+# exactly like markup and the palette changes in one place.
+
+data Decl = Decl Text Text
+data Rule = Rule Text (List Decl)
+
+# --- rendering --------------------------------------------------------------
+
+def renderDecl (d: Decl) -> Text =
+  match d { Decl prop value -> prop ++ ":" ++ value ++ ";" }
+
+def renderDecls (ds: List Decl) -> Text =
+  match ds { Nil -> "" | Cons d rest -> renderDecl d ++ renderDecls rest }
+
+def renderRule (r: Rule) -> Text =
+  match r { Rule selector ds -> selector ++ "{" ++ renderDecls ds ++ "}" }
+
+def renderCss (rules: List Rule) -> Text =
+  match rules { Nil -> "" | Cons r rest -> renderRule r ++ renderCss rest }
+
+# --- combinators ------------------------------------------------------------
+
+def decl (prop: Text) (value: Text) -> Decl = Decl prop value
+def rule (selector: Text) (ds: List Decl) -> Rule = Rule selector ds
+
+# Component-scoped styles concatenate: page assembly is `cssConcat` over every
+# component's `<name>Styles : List Rule` def.
+def cssConcat (a: List Rule) (b: List Rule) -> List Rule = append a b
+
+# --- design tokens ----------------------------------------------------------
+# Referenced by name, checked by the gate, changed in one place. These are the
+# stdlib defaults; a site pins its own palette as more token defs.
+
+def colorInk -> Text = "#1a1f2e"
+def colorPaper -> Text = "#fbfaf7"
+def colorAccent -> Text = "#2f6f4f"
+def colorMuted -> Text = "#6b7280"
+def fontMono -> Text = "ui-monospace, SFMono-Regular, Menlo, monospace"
+def fontSans -> Text = "system-ui, -apple-system, 'Segoe UI', sans-serif"
+def spaceS -> Text = "0.5rem"
+def spaceM -> Text = "1rem"
+def spaceL -> Text = "2rem"
+
+# --- tests (gate-run) --------------------------------------------------------
+
+def tst_renderDecl -> Bool = renderDecl (Decl "color" "#fff") == "color:#fff;"
+
+def tst_renderRule -> Bool =
+  renderRule (Rule ".hero" (Cons (Decl "margin" "0") (Cons (Decl "padding" spaceM) Nil)))
+    == ".hero{margin:0;padding:1rem;}"
+
+def tst_renderCssConcat -> Bool =
+  renderCss (cssConcat (Cons (Rule "a" (Cons (Decl "color" colorAccent) Nil)) Nil)
+                       (Cons (Rule "p" (Cons (Decl "margin" "0") Nil)) Nil))
+    == "a{color:#2f6f4f;}p{margin:0;}"
+
+def tst_renderCssEmpty -> Bool = renderCss Nil == ""
