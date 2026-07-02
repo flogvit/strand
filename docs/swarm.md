@@ -118,6 +118,17 @@ and HTTP gossip as the sync plane:
    — the namespace tab's convergence strip shows both Merkle roots against
    the observer's; three matching digests = one green namespace.
 
+Executed live (2026-07-02, `scripts/swarm-two-peer-live.sh`): two peers —
+separate stores, separate serve+worker processes, token-authenticated HTTP
+gossip, GitHub as the shared board (issues #57/#58), a real `claude`
+authoring. Peer A landed `chainBase`; peer B's `chainDouble` only
+type-checked because gossip had pulled A's definition across first. Final
+Merkle roots identical (one green namespace), both peers evaluate
+`chainDouble` to 42. The two processes stood in for the two boxes on one
+host — every byte between them crossed the authenticated HTTP transport and
+the public board; putting real distance between them is this runbook,
+verbatim.
+
 Behavior under failure: a machine dropping mid-run costs nothing —
 its claims go stale on the board (TTL on the issue's updatedAt) and are
 reclaimed; gossip skips dead peers; when it returns, one anti-entropy round

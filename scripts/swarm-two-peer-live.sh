@@ -50,8 +50,10 @@ $SWARM work --as b1 --provider "$PROVIDER" --root "$B" --gh "$BOARD" --peers "ht
 # one more pull A<-B so A also has B's work
 npx tsx -e "
 import { gossipOnce } from './src/distributed/transport.ts';
-const r = await gossipOnce('$A', ['http://127.0.0.1:$PORT_B']);
-console.log('final anti-entropy A<-B:', JSON.stringify(r));
+(async () => {
+  const r = await gossipOnce('$A', ['http://127.0.0.1:$PORT_B']);
+  console.log('final anti-entropy A<-B:', JSON.stringify(r));
+})();
 "
 SECS=$(( $(date +%s) - START ))
 
