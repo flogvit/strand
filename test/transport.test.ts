@@ -98,3 +98,30 @@ test("gossip survives an unreachable peer (no SPOF, just skip)", async () => {
   const after = loadRepo(rootA);
   assert.deepEqual(after.namespace, before.namespace, "local state untouched");
 });
+
+// #49: peer auth — a shared secret closes the transport to strangers.
+test("a token-protected peer rejects unauthenticated pulls and serves authenticated ones", async () => {
+  const rootA = fresh();
+  const rootB = fresh();
+  author(rootA, "agent-a", "add add", "def add (a: Int) (b: Int) -> Int = a + b");
+
+  const serverA = await servePeer(rootA, 0, { token: "s3cret" });
+  try {
+    // wrong token: loud 401 on the wire, zero peers reached in gossip
+    const res = await fetch(`${urlOf(serverA)}/index`, { headers: { authorization: "Bearer wrong" } });
+    assert.equal(res.status, 401);
+    const bare = await fetch(`${urlOf(serverA)}/index`);
+    assert.equal(bare.status, 401);
+
+    const denied = await gossipOnce(rootB, [urlOf(serverA)], { token: "wrong" });
+    assert.equal(denied.peersReached, 0, "gossip with a bad token reaches nothing");
+
+    // right token: the namespace flows
+    const ok = await gossipOnce(rootB, [urlOf(serverA)], { token: "s3cret" });
+    assert.equal(ok.peersReached, 1);
+    const repo = loadRepo(rootB);
+    assert.ok(repo.namespace.has("add"), "definition arrived through the authenticated transport");
+  } finally {
+    serverA.close();
+  }
+});

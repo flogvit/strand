@@ -13,5 +13,15 @@ you prefer otherwise.
 
 Known, documented trust boundaries (not vulnerabilities): `foreign` bindings
 are trusted by design (the checker takes them on faith and the backend emits
-them verbatim), and the HTTP sync transport is unauthenticated — run it on
-networks you trust.
+them verbatim).
+
+The HTTP sync transport supports shared-secret peer auth: set
+`STRAND_SYNC_TOKEN` (or pass `--token` to `strand-swarm serve`/`work`, or the
+`token` option to `servePeer`/`gossipOnce`) and every request must carry
+`Authorization: Bearer <token>`; anything else is rejected with 401. Without a
+token the transport is open — acceptable on localhost and trusted LANs only.
+Beyond that, always set a token, and front the port with TLS (a reverse proxy)
+if the network is genuinely hostile; per-peer identities are out of scope.
+Note the CRDT already makes malicious *state* survivable — junk still has to
+pass the green-gate to matter — so the token primarily guards against
+namespace exfiltration and junk-observation flooding.

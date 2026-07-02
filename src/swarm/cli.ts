@@ -37,10 +37,14 @@ const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestratio
                                                     (--require-tests gates every landed def
                                                     on attested tests — verify is then done)
   strand-swarm work --as <id> --provider <name> [--root <dir>] [--queue <dir> | --gh <owner/repo>]
-                    [--peers <url,url>] [--poll <ms>] [--idle <n>]
+                    [--peers <url,url>] [--token <secret>] [--poll <ms>] [--idle <n>]
                                                     run a worker until the queue drains
                                                     (exits after n empty polls, ms apart),
                                                     gossiping with the given peers
+  strand-swarm serve --port <n> [--root <dir>] [--host <ip>] [--token <secret>]
+                                                    serve this repo to pulling peers
+                                                    (token defaults to $STRAND_SYNC_TOKEN;
+                                                    required for anything beyond a trusted LAN)
   strand-swarm status [--queue <dir> | --gh <owner/repo>]
                                                     show the task board
   strand-swarm coverage [--root <dir>] [--queue <dir> | --gh <owner/repo>] [--require]
@@ -84,6 +88,7 @@ async function main(argv: string[]): Promise<number> {
         root,
         workerId,
         peers,
+        token: opts.token,
         maxIdlePolls: opts.idle ? Number(opts.idle) : undefined,
         pollMs: opts.poll ? Number(opts.poll) : undefined,
       });
@@ -140,6 +145,17 @@ async function main(argv: string[]): Promise<number> {
           (untested.length - opened > 0 ? ` (${untested.length - opened} already queued)` : "") +
           (opts.require ? ", each now requires 'tests'" : ""),
       );
+      return 0;
+    }
+
+    case "serve": {
+      const { servePeer } = await import("../distributed/transport.ts");
+      const port = Number(opts.port ?? 4100);
+      const server = await servePeer(root, port, { token: opts.token, host: opts.host });
+      const addr = server.address() as { address: string; port: number };
+      const auth = (opts.token ?? process.env.STRAND_SYNC_TOKEN) ? "token-authenticated" : "UNAUTHENTICATED (trusted networks only)";
+      console.log(`serving ${root} on http://${addr.address}:${addr.port} — ${auth}`);
+      await new Promise(() => {}); // serve until killed
       return 0;
     }
 

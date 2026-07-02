@@ -33,6 +33,9 @@ export interface WorkerOptions {
   /** Base backoff after a transient provider failure (doubles per consecutive
    *  failure, capped at 32x). */
   backoffMs?: number;
+  /** Shared-secret for the sync plane (#49) — sent to peers on every gossip
+   *  round. Defaults to $STRAND_SYNC_TOKEN. */
+  token?: string;
 }
 
 export interface WorkSummary {
@@ -204,7 +207,7 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
 }
 
 export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Promise<WorkSummary> {
-  const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3, backoffMs = 1000 } = opts;
+  const { root, workerId, maxIdlePolls = 3, pollMs = 100, peers = [], maxAttempts = 3, backoffMs = 1000, token } = opts;
   const summary: WorkSummary = { workerId, done: [], parked: [], provider: { timeouts: 0, transient: 0, permanent: 0 } };
   const attempts = new Map<string, number>();
   const lastFailure = new Map<string, string>();
@@ -214,7 +217,7 @@ export async function work(queue: Queue, agent: Agent, opts: WorkerOptions): Pro
   while (idle < maxIdlePolls) {
     // pull the sync plane first, so definitions landed on other machines are
     // in the local store before the agent (and the green-gate) run
-    if (peers.length > 0) await gossipOnce(root, peers);
+    if (peers.length > 0) await gossipOnce(root, peers, { token });
 
     const task = queue.claim(workerId);
     if (!task) {

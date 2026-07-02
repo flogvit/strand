@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { StoredItem } from "../core/store.ts";
 import type { Hash } from "../core/term.ts";
@@ -37,11 +38,39 @@ function readBody(req: import("node:http").IncomingMessage): Promise<string> {
   });
 }
 
+export interface ServeOptions {
+  /** Shared-secret peer auth (#49): when set, every request must carry
+   *  `Authorization: Bearer <token>` or it is rejected with 401. Defaults to
+   *  $STRAND_SYNC_TOKEN. Without a token the transport is open — localhost
+   *  and trusted LANs only (see SECURITY.md). */
+  token?: string;
+  /** Interface to bind. Defaults to 127.0.0.1; bind 0.0.0.0 to serve a real
+   *  network — then a token is strongly recommended. */
+  host?: string;
+}
+
+/** Constant-time token check — a comparison that leaks length or prefix
+ *  timing would let the network brute-force the secret. */
+function tokenOk(header: string | undefined, token: string): boolean {
+  const presented = header?.startsWith("Bearer ") ? header.slice(7) : "";
+  const a = Buffer.from(presented);
+  const b = Buffer.from(token);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /** Serve a repo's state to pulling peers. State is read from disk per request,
  *  so the server always ships what the worker loop most recently saved. */
-export function servePeer(root: string, port: number): Promise<Server> {
+export function servePeer(root: string, port: number, opts: ServeOptions = {}): Promise<Server> {
+  const token = opts.token ?? process.env.STRAND_SYNC_TOKEN;
   const server = createServer(async (req, res) => {
     try {
+      if (token && !tokenOk(req.headers.authorization, token)) {
+        // Reject loudly: an unauthenticated pull attempt is a configuration
+        // error or an intruder — either deserves a clear signal, not a 404.
+        res.writeHead(401, { "content-type": "text/plain" });
+        res.end("unauthorized: this peer requires Authorization: Bearer <token> (see STRAND_SYNC_TOKEN)");
+        return;
+      }
       if (req.method === "GET" && req.url === "/index") {
         const repo = loadRepo(root);
         json(res, indexToJSON(buildIndex(repo.store.hashes())));
@@ -70,19 +99,30 @@ export function servePeer(root: string, port: number): Promise<Server> {
       res.end(String((e as Error).message));
     }
   });
-  return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve(server)));
+  return new Promise((resolve) => server.listen(port, opts.host ?? "127.0.0.1", () => resolve(server)));
 }
 
-async function getJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+function authHeaders(token: string | undefined): Record<string, string> {
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+async function getJSON<T>(url: string, token?: string): Promise<T> {
+  const res = await fetch(url, { headers: authHeaders(token) });
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
   return (await res.json()) as T;
+}
+
+export interface GossipOptions {
+  /** Shared-secret sent as `Authorization: Bearer <token>` (#49). Defaults to
+   *  $STRAND_SYNC_TOKEN, so both halves of the transport read one knob. */
+  token?: string;
 }
 
 /** One anti-entropy round against each peer: pull the peer's index, fetch only
  *  the objects the Merkle diff says are missing, then join its CRDT state.
  *  Unreachable peers are skipped — gossip tolerates any subset being down. */
-export async function gossipOnce(root: string, peers: string[]): Promise<{ pulledObjects: number; peersReached: number }> {
+export async function gossipOnce(root: string, peers: string[], opts: GossipOptions = {}): Promise<{ pulledObjects: number; peersReached: number }> {
+  const token = opts.token ?? process.env.STRAND_SYNC_TOKEN;
   let pulledObjects = 0;
   let peersReached = 0;
 
@@ -90,8 +130,8 @@ export async function gossipOnce(root: string, peers: string[]): Promise<{ pulle
     let theirIndex: NodeJSON;
     let state: WireState;
     try {
-      theirIndex = await getJSON<NodeJSON>(`${peer}/index`);
-      state = await getJSON<WireState>(`${peer}/state`);
+      theirIndex = await getJSON<NodeJSON>(`${peer}/index`, token);
+      state = await getJSON<WireState>(`${peer}/state`, token);
     } catch {
       continue; // peer down — nothing to do, try again next round
     }
@@ -101,7 +141,7 @@ export async function gossipOnce(root: string, peers: string[]): Promise<{ pulle
     if (diff.missingFromA.length > 0) {
       const res = await fetch(`${peer}/objects`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders(token) },
         body: JSON.stringify({ hashes: diff.missingFromA }),
       });
       if (!res.ok) continue;

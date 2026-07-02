@@ -72,12 +72,15 @@ names the hint layer watches.
 
 Serve a repo to peers and let workers gossip:
 
-```ts
-import { servePeer } from "./src/distributed/transport.ts";
-await servePeer(root, 4100);
+```sh
+npm run strand-swarm -- serve --port 4100 --host 0.0.0.0 --token <secret>
 ```
 
-then run workers elsewhere with `--peers http://that-host:4100`. Convergence is
+(or from code: `await servePeer(root, 4100, { token })`), then run workers
+elsewhere with `--peers http://that-host:4100 --token <secret>`. The token
+(defaulting to `$STRAND_SYNC_TOKEN` on both sides) authenticates every pull —
+without one the transport is open and belongs on trusted networks only (see
+SECURITY.md). Convergence is
 by construction (store union + CRDT join); anti-entropy keeps the exchange
 proportional to the diff. `test/swarm-multimachine.test.ts` is the executable
 proof: worker B lands a definition that only typechecks because gossip pulled
