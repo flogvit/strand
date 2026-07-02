@@ -1,0 +1,440 @@
+# Sudoku generator authored live by a claude swarm (22 queue tasks through the
+# green-gate, zero rejections — see scripts/swarm-sudoku-live.ts). Exported
+# verbatim with 'strand export'; solver verified against Wikipedia's puzzle by
+# scripts/oracle-sudoku.ts in both engines.
+
+data List a = Nil | Cons a (List a)
+
+data Option a = None | Some a
+
+data Pair a b = Pair a b
+
+data Grid = Grid (List Int)
+
+def add (a: Int) (b: Int) -> Int = a + b
+
+def length (xs: List a) -> Int = match xs { Nil -> 0 | Cons h t -> 1 + length t }
+
+def append (xs: List a) (ys: List a) -> List a = match xs { Nil -> ys | Cons h t -> Cons h (append t ys) }
+
+def map (f: a -> b) (xs: List a) -> List b = match xs { Nil -> Nil | Cons h t -> Cons (f h) (map f t) }
+
+def filter (p: a -> Bool) (xs: List a) -> List a = match xs { Nil -> Nil | Cons h t -> if p h then Cons h (filter p t) else filter p t }
+
+def foldr (f: a -> b -> b) (z: b) (xs: List a) -> b = match xs { Nil -> z | Cons h t -> f h (foldr f z t) }
+
+def sum (xs: List Int) -> Int = foldr add 0 xs
+
+def range (n: Int) -> List Int = if n < 1 then Nil else append (range (n - 1)) (Cons n Nil)
+
+def gridIndex (row: Int) (col: Int) -> Int = row * 9 + col
+
+def inBounds (row: Int) (col: Int) -> Bool = row >= 0 && row < 9 && col >= 0 && col < 9
+
+def nth (i: Int) (xs: List a) -> Option a = match xs { Nil -> None | Cons h t -> if i == 0 then Some h else nth (i - 1) t }
+
+def setNth (i: Int) (v: a) (xs: List a) -> List a = match xs { Nil -> Nil | Cons h t -> if i == 0 then Cons v t else Cons h (setNth (i - 1) v t) }
+
+def replicate (n: Int) (v: a) -> List a = if n < 1 then Nil else Cons v (replicate (n - 1) v)
+
+def emptyGrid -> Grid = Grid (replicate 81 0)
+
+def cells (g: Grid) -> List Int = match g { Grid xs -> xs }
+
+def getCell (g: Grid) (row: Int) (col: Int) -> Option Int = if inBounds row col then nth (gridIndex row col) (cells g) else None
+
+def setCell (g: Grid) (row: Int) (col: Int) (v: Int) -> Grid = if inBounds row col then Grid (setNth (gridIndex row col) v (cells g)) else g
+
+def tst_emptyGridHas81Cells -> Bool = length (cells emptyGrid) == 81
+
+def tst_getFromEmptyIsZero -> Bool = match getCell emptyGrid 4 4 { Some v -> v == 0 | None -> false }
+
+def tst_setThenGet -> Bool = match getCell (setCell emptyGrid 2 7 5) 2 7 { Some v -> v == 5 | None -> false }
+
+def tst_setDoesNotTouchOthers -> Bool = match getCell (setCell emptyGrid 2 7 5) 2 6 { Some v -> v == 0 | None -> false }
+
+def tst_outOfBoundsIsNone -> Bool = match getCell emptyGrid 9 0 { Some v -> false | None -> true }
+
+def cellIs (g: Grid) (row: Int) (col: Int) (v: Int) -> Bool = match getCell g row col { Some x -> x == v | None -> false }
+
+def rowHasFrom (g: Grid) (row: Int) (col: Int) (v: Int) -> Bool = if col >= 9 then false else if cellIs g row col v then true else rowHasFrom g row (col + 1) v
+
+def rowOk (g: Grid) (row: Int) (v: Int) -> Bool = if v == 0 then true else if rowHasFrom g row 0 v then false else true
+
+def tst_rowOkOnEmptyGrid -> Bool = rowOk emptyGrid 3 7
+
+def tst_rowOkRejectsDuplicate -> Bool = if rowOk (setCell emptyGrid 3 2 7) 3 7 then false else true
+
+def tst_rowOkOtherRowUnaffected -> Bool = rowOk (setCell emptyGrid 3 2 7) 4 7
+
+def tst_rowOkZeroAlwaysLegal -> Bool = rowOk (setCell emptyGrid 3 2 7) 3 0
+
+def colHasFrom (g: Grid) (row: Int) (col: Int) (v: Int) -> Bool = if row >= 9 then false else if cellIs g row col v then true else colHasFrom g (row + 1) col v
+
+def colOk (g: Grid) (col: Int) (v: Int) -> Bool = if v == 0 then true else if colHasFrom g 0 col v then false else true
+
+def tst_colOkOnEmptyGrid -> Bool = colOk emptyGrid 3 7
+
+def tst_colOkRejectsDuplicate -> Bool = if colOk (setCell emptyGrid 2 3 7) 3 7 then false else true
+
+def tst_colOkOtherColUnaffected -> Bool = colOk (setCell emptyGrid 2 3 7) 4 7
+
+def tst_colOkZeroAlwaysLegal -> Bool = colOk (setCell emptyGrid 2 3 7) 3 0
+
+def boxStart (i: Int) -> Int = i / 3 * 3
+
+def boxHasFrom (g: Grid) (row: Int) (col: Int) (rowEnd: Int) (colStart: Int) (colEnd: Int) (v: Int) -> Bool = if row >= rowEnd then false else if col >= colEnd then boxHasFrom g (row + 1) colStart rowEnd colStart colEnd v else if cellIs g row col v then true else boxHasFrom g row (col + 1) rowEnd colStart colEnd v
+
+def boxOk (g: Grid) (row: Int) (col: Int) (v: Int) -> Bool = if v == 0 then true else if boxHasFrom g (boxStart row) (boxStart col) (boxStart row + 3) (boxStart col) (boxStart col + 3) v then false else true
+
+def tst_boxOkOnEmptyGrid -> Bool = boxOk emptyGrid 4 4 7
+
+def tst_boxOkRejectsDuplicateInBox -> Bool = if boxOk (setCell emptyGrid 0 0 7) 1 2 7 then false else true
+
+def tst_boxOkOtherBoxUnaffected -> Bool = boxOk (setCell emptyGrid 0 0 7) 3 3 7
+
+def tst_boxOkZeroAlwaysLegal -> Bool = boxOk (setCell emptyGrid 0 0 7) 1 1 0
+
+def valid (g: Grid) (row: Int) (col: Int) (v: Int) -> Bool = inBounds row col && rowOk g row v && colOk g col v && boxOk g row col v
+
+def tst_validOnEmptyGrid -> Bool = valid emptyGrid 4 4 7
+
+def tst_validRejectsRowDuplicate -> Bool = if valid (setCell emptyGrid 3 2 7) 3 5 7 then false else true
+
+def tst_validRejectsColDuplicate -> Bool = if valid (setCell emptyGrid 2 3 7) 5 3 7 then false else true
+
+def tst_validRejectsBoxDuplicate -> Bool = if valid (setCell emptyGrid 0 0 7) 1 2 7 then false else true
+
+def tst_validRejectsOutOfBounds -> Bool = if valid emptyGrid 9 0 7 then false else true
+
+def tst_validZeroIsLegal -> Bool = valid (setCell emptyGrid 3 2 7) 3 5 0
+
+def solveCell (g: Grid) (row: Int) (col: Int) -> Option Grid = if row >= 9 then Some g else if col >= 9 then solveCell g (row + 1) 0 else if cellIs g row col 0 then tryValues g row col 1 else solveCell g row (col + 1)
+
+def tryValues (g: Grid) (row: Int) (col: Int) (v: Int) -> Option Grid = if v > 9 then None else if valid g row col v then match solveCell (setCell g row col v) row (col + 1) { Some s -> Some s | None -> tryValues g row col (v + 1) } else tryValues g row col (v + 1)
+
+def solve (g: Grid) -> Option Grid = solveCell g 0 0
+
+def noZeros (xs: List Int) -> Bool = match xs { Nil -> true | Cons h t -> if h == 0 then false else noZeros t }
+
+def tst_solveEmptyGridSucceeds -> Bool = match solve emptyGrid { Some s -> noZeros (cells s) | None -> false }
+
+def tst_solvePreservesClue -> Bool = match solve (setCell emptyGrid 0 0 5) { Some s -> cellIs s 0 0 5 | None -> false }
+
+def tst_solveFirstRowStartsLegal -> Bool = match solve emptyGrid { Some s -> if cellIs s 0 0 1 then rowHasFrom s 0 1 2 else true | None -> false }
+
+def countAdd (n: Int) (g: Grid) (row: Int) (col: Int) (v: Int) (limit: Int) -> Int = if n >= limit then n else n + countValuesUpTo g row col (v + 1) (limit - n)
+
+def countCellFrom (g: Grid) (row: Int) (col: Int) (limit: Int) -> Int = if row >= 9 then 1 else if col >= 9 then countCellFrom g (row + 1) 0 limit else if cellIs g row col 0 then countValuesUpTo g row col 1 limit else countCellFrom g row (col + 1) limit
+
+def countValuesUpTo (g: Grid) (row: Int) (col: Int) (v: Int) (limit: Int) -> Int = if v > 9 then 0 else if valid g row col v then countAdd (countCellFrom (setCell g row col v) row (col + 1) limit) g row col v limit else countValuesUpTo g row col (v + 1) limit
+
+def countSolutions (g: Grid) (limit: Int) -> Int = if limit < 1 then 0 else countCellFrom g 0 0 limit
+
+def tst_countSolutionsZeroLimit -> Bool = countSolutions emptyGrid 0 == 0
+
+def tst_countSolutionsSolvedGridIsOne -> Bool = match solve emptyGrid { Some s -> countSolutions s 5 == 1 | None -> false }
+
+def tst_countSolutionsBoundedByLimit -> Bool = countSolutions emptyGrid 2 == 2
+
+def isUnique (g: Grid) -> Bool = countSolutions g 2 == 1
+
+def fullBoard -> Grid = match solve emptyGrid { Some s -> s | None -> emptyGrid }
+
+def tst_fullBoardHasNoZeros -> Bool = noZeros (cells fullBoard)
+
+def tst_fullBoardHas81Cells -> Bool = length (cells fullBoard) == 81
+
+def tst_isUniqueSolvedGrid -> Bool = isUnique fullBoard
+
+def digTarget (difficulty: Int) -> Int = if difficulty <= 1 then 30 else if difficulty == 2 then 40 else 50
+
+def wrap81 (i: Int) -> Int = if i >= 81 then i - 81 else i
+
+def digFrom (g: Grid) (idx: Int) (steps: Int) (remaining: Int) -> Grid = if remaining < 1 then g else if steps >= 81 then g else digTryCell g idx steps remaining
+
+def digKeepOrSkip (g: Grid) (dug: Grid) (idx: Int) (steps: Int) (remaining: Int) -> Grid = if isUnique dug then digFrom dug (wrap81 (idx + 53)) (steps + 1) (remaining - 1) else digFrom g (wrap81 (idx + 53)) (steps + 1) remaining
+
+def digTryCell (g: Grid) (idx: Int) (steps: Int) (remaining: Int) -> Grid = match getCell g (idx / 9) (idx - idx / 9 * 9) { Some v -> if v == 0 then digFrom g (wrap81 (idx + 53)) (steps + 1) remaining else digKeepOrSkip g (setCell g (idx / 9) (idx - idx / 9 * 9) 0) idx steps remaining | None -> g }
+
+def dig (g: Grid) (difficulty: Int) -> Grid = digFrom g 0 0 (digTarget difficulty)
+
+def isZero (v: Int) -> Bool = v == 0
+
+def countZeros (g: Grid) -> Int = length (filter isZero (cells g))
+
+def tst_digRemovesCells -> Bool = countZeros (dig fullBoard 1) > 0
+
+def tst_digPreservesUniqueness -> Bool = isUnique (dig fullBoard 1)
+
+def tst_digHarderRemovesAtLeastAsMany -> Bool = countZeros (dig fullBoard 3) >= countZeros (dig fullBoard 1)
+
+def tst_digOnEmptyGridChangesNothing -> Bool = countZeros (dig emptyGrid 1) == 81
+
+def generate (difficulty: Int) -> Grid = dig fullBoard difficulty
+
+def tst_generateHasZeros -> Bool = countZeros (generate 1) > 0
+
+def tst_generateIsUnique -> Bool = isUnique (generate 1)
+
+def tst_generateSolvable -> Bool = match solve (generate 1) { Some s -> noZeros (cells s) | None -> false }
+
+def tst_generateHarderDigsMore -> Bool = countZeros (generate 3) >= countZeros (generate 1)
+
+def tst_gridIndexLastCell -> Bool = gridIndex 8 8 == 80
+
+def tst_gridIndexFirstCell -> Bool = gridIndex 0 0 == 0
+
+def tst_getNegativeRowIsNone -> Bool = match getCell emptyGrid (0 - 1) 0 { Some v -> false | None -> true }
+
+def tst_getNegativeColIsNone -> Bool = match getCell emptyGrid 0 (0 - 1) { Some v -> false | None -> true }
+
+def tst_getColOutOfRangeIsNone -> Bool = match getCell emptyGrid 0 9 { Some v -> false | None -> true }
+
+def tst_setOutOfBoundsUnchanged -> Bool = length (filter isZero (cells (setCell emptyGrid 9 0 5))) == 81
+
+def tst_setNegativeUnchanged -> Bool = length (filter isZero (cells (setCell emptyGrid (0 - 1) 4 5))) == 81
+
+def tst_setPreservesLength -> Bool = length (cells (setCell emptyGrid 2 7 5)) == 81
+
+def tst_setOverwrites -> Bool = cellIs (setCell (setCell emptyGrid 4 4 3) 4 4 8) 4 4 8
+
+def tst_setCornerTopLeft -> Bool = cellIs (setCell emptyGrid 0 0 9) 0 0 9
+
+def tst_setCornerBottomRight -> Bool = cellIs (setCell emptyGrid 8 8 1) 8 8 1
+
+def tst_setRowNeighborDistinct -> Bool = cellIs (setCell emptyGrid 3 8 4) 4 0 0
+
+def tst_setTwoCellsIndependent -> Bool = cellIs (setCell (setCell emptyGrid 1 1 2) 7 7 6) 1 1 2
+
+def tst_rowOkDuplicateAtRowStart -> Bool = if rowOk (setCell emptyGrid 5 0 3) 5 3 then false else true
+
+def tst_rowOkDuplicateAtRowEnd -> Bool = if rowOk (setCell emptyGrid 5 8 3) 5 3 then false else true
+
+def tst_rowOkDifferentValueSameRow -> Bool = rowOk (setCell emptyGrid 5 4 3) 5 9
+
+def tst_rowOkColOfDuplicateIrrelevant -> Bool = if rowOk (setCell emptyGrid 0 7 1) 0 1 then false else true
+
+def tst_rowOkIgnoresOtherRowsAllSet -> Bool = rowOk (setCell (setCell emptyGrid 2 4 6) 4 4 6) 3 6
+
+def tst_rowOkZeroLegalEvenOnFullRowValue -> Bool = rowOk (setCell emptyGrid 6 0 9) 6 0
+
+def tst_colOkDuplicateAtColStart -> Bool = if colOk (setCell emptyGrid 0 5 3) 5 3 then false else true
+
+def tst_colOkDuplicateAtColEnd -> Bool = if colOk (setCell emptyGrid 8 5 3) 5 3 then false else true
+
+def tst_colOkDifferentValueSameCol -> Bool = colOk (setCell emptyGrid 4 5 3) 5 9
+
+def tst_colOkRowOfDuplicateIrrelevant -> Bool = if colOk (setCell emptyGrid 7 0 1) 0 1 then false else true
+
+def tst_colOkIgnoresOtherColsAllSet -> Bool = colOk (setCell (setCell emptyGrid 4 2 6) 4 4 6) 3 6
+
+def tst_colOkFirstColumn -> Bool = if colOk (setCell emptyGrid 3 0 8) 0 8 then false else true
+
+def tst_colOkLastColumn -> Bool = if colOk (setCell emptyGrid 3 8 8) 8 8 then false else true
+
+def tst_colOkZeroLegalEvenWithValueInCol -> Bool = colOk (setCell emptyGrid 0 6 9) 6 0
+
+def tst_boxOkDuplicateAtBoxCorner -> Bool = if boxOk (setCell emptyGrid 2 2 5) 0 0 5 then false else true
+
+def tst_boxOkLastBox -> Bool = if boxOk (setCell emptyGrid 8 8 4) 6 6 4 then false else true
+
+def tst_boxOkCenterBox -> Bool = if boxOk (setCell emptyGrid 3 5 2) 5 3 2 then false else true
+
+def tst_boxOkDifferentValueSameBox -> Bool = boxOk (setCell emptyGrid 0 0 7) 1 1 8
+
+def tst_boxOkSameRowDifferentBox -> Bool = boxOk (setCell emptyGrid 0 0 7) 0 3 7
+
+def tst_boxOkSameColDifferentBox -> Bool = boxOk (setCell emptyGrid 0 0 7) 3 0 7
+
+def tst_boxOkBoundaryRow2Vs3 -> Bool = boxOk (setCell emptyGrid 2 0 6) 3 0 6
+
+def tst_boxOkBoundaryCol2Vs3 -> Bool = boxOk (setCell emptyGrid 0 2 6) 0 3 6
+
+def tst_boxOkSameCellCoordinates -> Bool = if boxOk (setCell emptyGrid 4 4 9) 4 4 9 then false else true
+
+def tst_boxOkZeroLegalInFullBox -> Bool = boxOk (setCell emptyGrid 6 6 1) 7 7 0
+
+def tst_boxOkEmptyGridBottomRight -> Bool = boxOk emptyGrid 8 8 9
+
+def tst_validNegativeRowRejected -> Bool = if valid emptyGrid (0 - 1) 4 7 then false else true
+
+def tst_validNegativeColRejected -> Bool = if valid emptyGrid 4 (0 - 1) 7 then false else true
+
+def tst_validColOutOfRangeRejected -> Bool = if valid emptyGrid 0 9 7 then false else true
+
+def tst_validZeroOutOfBoundsStillRejected -> Bool = if valid emptyGrid 9 9 0 then false else true
+
+def tst_validDifferentValueSameRowAllowed -> Bool = valid (setCell emptyGrid 3 2 7) 3 5 8
+
+def tst_validDifferentValueSameColAllowed -> Bool = valid (setCell emptyGrid 2 3 7) 5 3 8
+
+def tst_validDifferentValueSameBoxAllowed -> Bool = valid (setCell emptyGrid 0 0 7) 1 2 8
+
+def tst_validUnrelatedCellNoEffect -> Bool = valid (setCell emptyGrid 0 0 7) 4 4 7
+
+def tst_validCornerBottomRightOnEmpty -> Bool = valid emptyGrid 8 8 9
+
+def tst_validRejectsRowDuplicateAcrossBoxes -> Bool = if valid (setCell emptyGrid 4 0 5) 4 8 5 then false else true
+
+def tst_validRejectsColDuplicateAcrossBoxes -> Bool = if valid (setCell emptyGrid 0 4 5) 8 4 5 then false else true
+
+def tst_validRejectsBoxDuplicateOffRowCol -> Bool = if valid (setCell emptyGrid 6 6 4) 8 8 4 then false else true
+
+def tst_validZeroLegalDespiteAllConflicts -> Bool = valid (setCell emptyGrid 4 4 6) 4 4 0
+
+def tst_validOnSolvedGridOccupiedValueRejected -> Bool = match solve emptyGrid { Some s -> match getCell s 4 4 { Some v -> if valid s 4 4 v then false else true | None -> false } | None -> false }
+
+def listEqInt (xs: List Int) (ys: List Int) -> Bool = match xs { Nil -> match ys { Nil -> true | Cons h2 t2 -> false } | Cons h t -> match ys { Nil -> false | Cons h2 t2 -> h == h2 && listEqInt t t2 } }
+
+def rowVals (g: Grid) (row: Int) (col: Int) -> List Int = if col >= 9 then Nil else match getCell g row col { Some v -> Cons v (rowVals g row (col + 1)) | None -> Nil }
+
+def colVals (g: Grid) (row: Int) (col: Int) -> List Int = if row >= 9 then Nil else match getCell g row col { Some v -> Cons v (colVals g (row + 1) col) | None -> Nil }
+
+def setRowVals (g: Grid) (row: Int) (col: Int) (v: Int) -> Grid = if col >= 8 then g else setRowVals (setCell g row col v) row (col + 1) (v + 1)
+
+def unsolvableGrid -> Grid = setCell (setRowVals emptyGrid 0 0 1) 5 8 9
+
+def tst_solveUnsolvableIsNone -> Bool = match solve unsolvableGrid { Some s -> false | None -> true }
+
+def tst_solveResultHas81Cells -> Bool = match solve emptyGrid { Some s -> length (cells s) == 81 | None -> false }
+
+def tst_solveSolvedGridIsIdentity -> Bool = match solve fullBoard { Some s -> listEqInt (cells s) (cells fullBoard) | None -> false }
+
+def tst_solvePreservesMultipleClues -> Bool = match solve (setCell (setCell emptyGrid 0 0 5) 8 8 3) { Some s -> cellIs s 0 0 5 && cellIs s 8 8 3 | None -> false }
+
+def tst_solveFirstRowSums45 -> Bool = match solve emptyGrid { Some s -> sum (rowVals s 0 0) == 45 | None -> false }
+
+def tst_solveLastRowSums45 -> Bool = match solve emptyGrid { Some s -> sum (rowVals s 8 0) == 45 | None -> false }
+
+def tst_solveFirstColSums45 -> Bool = match solve emptyGrid { Some s -> sum (colVals s 0 0) == 45 | None -> false }
+
+def tst_solveLastColSums45 -> Bool = match solve emptyGrid { Some s -> sum (colVals s 0 8) == 45 | None -> false }
+
+def tst_solveRestoresDugCell -> Bool = match getCell fullBoard 4 4 { Some v -> match solve (setCell fullBoard 4 4 0) { Some s -> cellIs s 4 4 v | None -> false } | None -> false }
+
+def tst_countSolutionsNegativeLimitIsZero -> Bool = countSolutions emptyGrid (0 - 3) == 0
+
+def tst_countSolutionsUnsolvableIsZero -> Bool = countSolutions unsolvableGrid 5 == 0
+
+def tst_countSolutionsEmptyLimitOneIsOne -> Bool = countSolutions emptyGrid 1 == 1
+
+def tst_countSolutionsEmptyLimitThreeHitsLimit -> Bool = countSolutions emptyGrid 3 == 3
+
+def tst_countSolutionsOneCellDugIsOne -> Bool = countSolutions (setCell fullBoard 4 4 0) 3 == 1
+
+def tst_countSolutionsSolvedLimitOneIsOne -> Bool = countSolutions fullBoard 1 == 1
+
+def tst_countSolutionsConflictingCluesIsZero -> Bool = countSolutions (setCell (setCell emptyGrid 0 0 7) 0 1 7) 2 == 0
+
+def tst_countSolutionsMatchesSolveOnUnsolvable -> Bool = match solve unsolvableGrid { Some s -> false | None -> countSolutions unsolvableGrid 1 == 0 }
+
+def tst_isUniqueEmptyGridFalse -> Bool = if isUnique emptyGrid then false else true
+
+def tst_isUniqueUnsolvableFalse -> Bool = if isUnique unsolvableGrid then false else true
+
+def tst_isUniqueOneCellDug -> Bool = isUnique (setCell fullBoard 4 4 0)
+
+def tst_isUniqueConflictingCluesFalse -> Bool = if isUnique (setCell (setCell emptyGrid 0 0 7) 0 1 7) then false else true
+
+def tst_isUniqueAgreesWithCountOne -> Bool = if isUnique fullBoard then countSolutions fullBoard 2 == 1 else false
+
+def tst_isUniqueTwoCellsDug -> Bool = isUnique (setCell (setCell fullBoard 0 0 0) 8 8 0)
+
+def boxVals (g: Grid) (row: Int) (col: Int) (i: Int) -> List Int = if i >= 9 then Nil else match getCell g (row + i / 3) (col + (i - i / 3 * 3)) { Some v -> Cons v (boxVals g row col (i + 1)) | None -> Nil }
+
+def allRowsSum45 (g: Grid) (row: Int) -> Bool = if row >= 9 then true else sum (rowVals g row 0) == 45 && allRowsSum45 g (row + 1)
+
+def allColsSum45 (g: Grid) (col: Int) -> Bool = if col >= 9 then true else sum (colVals g 0 col) == 45 && allColsSum45 g (col + 1)
+
+def inRange1To9 (v: Int) -> Bool = v >= 1 && v <= 9
+
+def allInRange (xs: List Int) -> Bool = match xs { Nil -> true | Cons h t -> inRange1To9 h && allInRange t }
+
+def tst_fullBoardAllRowsSum45 -> Bool = allRowsSum45 fullBoard 0
+
+def tst_fullBoardAllColsSum45 -> Bool = allColsSum45 fullBoard 0
+
+def tst_fullBoardFirstBoxSums45 -> Bool = sum (boxVals fullBoard 0 0 0) == 45
+
+def tst_fullBoardCenterBoxSums45 -> Bool = sum (boxVals fullBoard 3 3 0) == 45
+
+def tst_fullBoardLastBoxSums45 -> Bool = sum (boxVals fullBoard 6 6 0) == 45
+
+def tst_fullBoardCellsInRange -> Bool = allInRange (cells fullBoard)
+
+def tst_fullBoardMatchesSolveEmpty -> Bool = match solve emptyGrid { Some s -> listEqInt (cells s) (cells fullBoard) | None -> false }
+
+def tst_fullBoardDeterministic -> Bool = listEqInt (cells fullBoard) (cells fullBoard)
+
+def tst_fullBoardTotalSum405 -> Bool = sum (cells fullBoard) == 405
+
+def tst_fullBoardEveryCellOccupiedValueRejected -> Bool = match getCell fullBoard 0 0 { Some v -> if valid fullBoard 0 0 v then false else true | None -> false }
+
+def tst_digTargetEasyIs30 -> Bool = digTarget 1 == 30
+
+def tst_digTargetMediumIs40 -> Bool = digTarget 2 == 40
+
+def tst_digTargetHardIs50 -> Bool = digTarget 3 == 50
+
+def tst_digTargetBelowOneTreatedEasy -> Bool = digTarget 0 == 30
+
+def tst_digTargetAboveThreeTreatedHard -> Bool = digTarget 7 == 50
+
+def tst_digEasyRemovesAtMostTarget -> Bool = countZeros (dig fullBoard 1) <= digTarget 1
+
+def tst_digHardRemovesAtMostTarget -> Bool = countZeros (dig fullBoard 3) <= digTarget 3
+
+def tst_digPreservesLength -> Bool = length (cells (dig fullBoard 1)) == 81
+
+def tst_digMediumRemovesAtLeastAsManyAsEasy -> Bool = countZeros (dig fullBoard 2) >= countZeros (dig fullBoard 1)
+
+def tst_digHardRemovesAtLeastAsManyAsMedium -> Bool = countZeros (dig fullBoard 3) >= countZeros (dig fullBoard 2)
+
+def tst_digResultSolvable -> Bool = match solve (dig fullBoard 1) { Some s -> noZeros (cells s) | None -> false }
+
+def tst_digSolutionIsOriginalBoard -> Bool = match solve (dig fullBoard 1) { Some s -> listEqInt (cells s) (cells fullBoard) | None -> false }
+
+def cluesFromOriginal (orig: List Int) (dug: List Int) -> Bool = match dug { Nil -> match orig { Nil -> true | Cons h2 t2 -> false } | Cons h t -> match orig { Nil -> false | Cons h2 t2 -> (h == 0 || h == h2) && cluesFromOriginal t2 t } }
+
+def tst_digOnlyClearsNeverAlters -> Bool = cluesFromOriginal (cells fullBoard) (cells (dig fullBoard 1))
+
+def zeroOrInRange (v: Int) -> Bool = v == 0 || inRange1To9 v
+
+def allZeroOrInRange (xs: List Int) -> Bool = match xs { Nil -> true | Cons h t -> zeroOrInRange h && allZeroOrInRange t }
+
+def tst_digCellsZeroOrInRange -> Bool = allZeroOrInRange (cells (dig fullBoard 2))
+
+def tst_digMediumPreservesUniqueness -> Bool = isUnique (dig fullBoard 2)
+
+def tst_digDeterministic -> Bool = listEqInt (cells (dig fullBoard 1)) (cells (dig fullBoard 1))
+
+def tst_digLeavesSomeClues -> Bool = countZeros (dig fullBoard 3) < 81
+
+def tst_generatePreservesLength -> Bool = length (cells (generate 1)) == 81
+
+def tst_generateCellsZeroOrInRange -> Bool = allZeroOrInRange (cells (generate 2))
+
+def tst_generateRemovesAtMostTarget -> Bool = countZeros (generate 1) <= digTarget 1
+
+def tst_generateHardRemovesAtMostTarget -> Bool = countZeros (generate 3) <= digTarget 3
+
+def tst_generateMediumBetweenEasyAndHard -> Bool = countZeros (generate 2) >= countZeros (generate 1) && countZeros (generate 3) >= countZeros (generate 2)
+
+def tst_generateDeterministic -> Bool = listEqInt (cells (generate 1)) (cells (generate 1))
+
+def tst_generateSolutionIsFullBoard -> Bool = match solve (generate 1) { Some s -> listEqInt (cells s) (cells fullBoard) | None -> false }
+
+def tst_generateCluesComeFromFullBoard -> Bool = cluesFromOriginal (cells fullBoard) (cells (generate 2))
+
+def tst_generateLeavesSomeClues -> Bool = countZeros (generate 3) < 81
+
+def tst_generateEqualsDigOfFullBoard -> Bool = listEqInt (cells (generate 2)) (cells (dig fullBoard 2))
+
+def tst_generateDifficultyZeroTreatedEasy -> Bool = listEqInt (cells (generate 0)) (cells (generate 1))
+
+def tst_generateDifficultyAboveThreeTreatedHard -> Bool = listEqInt (cells (generate 9)) (cells (generate 3))
+
+def tst_generateMediumIsUnique -> Bool = isUnique (generate 2)
+
+def tst_generateHardSolvable -> Bool = match solve (generate 3) { Some s -> noZeros (cells s) | None -> false }
