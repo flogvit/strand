@@ -156,3 +156,56 @@ test("helperPrefix: unprefixed helpers are rejected with feedback; prefixed ones
   // the bare helper never reached the store
   assert.throws(() => strand(root, ["show", "go"]));
 });
+
+// #51: done means attested — a test task completes only when the suite is
+// green and its targets sit in the attested closure.
+test("a test task whose tests never reach the target is rejected", async () => {
+  const root = mkdtempSync(join(tmpdir(), "strand-swarm-attest-"));
+  strand(root, ["init"]);
+  const queue = new FileQueue(join(root, ".strand-swarm"));
+  const code = queue.add({ title: "code add", role: "code", intent: "adder", target: ["add"], deps: [], require: ["tests"] });
+  queue.add({ title: "test add", role: "test", intent: "verify add", target: ["add"], deps: [code.id] });
+
+  let testAttempts = 0;
+  const agent: Agent = {
+    provider: "fake",
+    run(ctx: AgentContext): AgentResult {
+      if (ctx.task.role === "code") return { code: "def add (a: Int) (b: Int) -> Int = a + b", report: "ok" };
+      testAttempts++;
+      // first attempt: a green test that never touches add — must be rejected
+      if (testAttempts === 1) return { code: "def tst_addTrivial -> Bool = true", report: "lazy" };
+      return { code: "def tst_addWorks -> Bool = add 2 3 == 5", report: "real" };
+    },
+  };
+
+  const summary = await work(queue, agent, { root, workerId: "w1", maxIdlePolls: 2, pollMs: 5 });
+  assert.equal(summary.done.length, 2, "code + (eventually) test task done");
+  assert.ok(testAttempts >= 2, "the lazy test attempt was rejected");
+
+  // the require:["tests"] carried by the code task now verifies green
+  const out = strand(root, ["verify"]);
+  assert.match(out, /green add/);
+  assert.match(out, /all required checks attested/);
+});
+
+test("a test task with a red suite does not complete", async () => {
+  const root = mkdtempSync(join(tmpdir(), "strand-swarm-redsuite-"));
+  strand(root, ["init"]);
+  const queue = new FileQueue(join(root, ".strand-swarm"));
+  const code = queue.add({ title: "code add", role: "code", intent: "adder", target: ["add"], deps: [] });
+  queue.add({ title: "test add", role: "test", intent: "verify add", target: ["add"], deps: [code.id] });
+
+  const agent: Agent = {
+    provider: "fake",
+    run(ctx: AgentContext): AgentResult {
+      if (ctx.task.role === "code") return { code: "def add (a: Int) (b: Int) -> Int = a + b", report: "ok" };
+      // types check, but the assertion is wrong — the suite goes red
+      return { code: "def tst_addWrong -> Bool = add 2 3 == 6", report: "wrong" };
+    },
+  };
+
+  const summary = await work(queue, agent, { root, workerId: "w1", maxIdlePolls: 2, pollMs: 5, maxAttempts: 2 });
+  assert.equal(summary.done.length, 1, "only the code task completed");
+  const testTask = queue.list().find((t) => t.role === "test")!;
+  assert.equal(testTask.state, "parked", "red tests parked the task after the attempt budget");
+});

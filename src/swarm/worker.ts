@@ -163,6 +163,43 @@ function attempt(root: string, workerId: string, agent: Agent, task: Task, notes
   if (!landed(root, defNames(result.code))) {
     return { state: "ready", comment: "submitted but a definition did not land (likely parked as a name conflict)", assumptions };
   }
+
+  // #51: done means attested. A test task is complete only when the suite is
+  // green AND its targets sit in the attested dependency closure of the tests —
+  // green types are the gate's job; green behavior is this one's.
+  if (task.role === "test") {
+    try {
+      strand(root, ["test"]);
+    } catch (e) {
+      const err = e as Error & { stdout?: string };
+      const fails = (err.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")).join("; ");
+      return { state: "ready", comment: `test suite red after landing: ${fails || gateError(e)}`, assumptions };
+    }
+    const after = loadRepo(root);
+    const missing = task.target.filter((t) => {
+      const b = after.namespace.get(t);
+      if (!b || !after.store.defOf(b.hash)) return false; // abstract label or data decl — nothing to attest
+      return !(after.attestations[b.hash] ?? []).includes("tests");
+    });
+    if (missing.length > 0) {
+      return { state: "ready", comment: `tests pass but never exercise: ${missing.join(", ")} — write tests that reach them`, assumptions };
+    }
+  }
+
+  // #51 planner option: checks this task requires land on the defs it produced,
+  // so `strand verify` becomes the workload's definition of done.
+  if (task.role === "code" && task.require?.length) {
+    const after = loadRepo(root);
+    let changed = false;
+    for (const n of defNames(result.code)) {
+      const b = after.namespace.get(n);
+      if (!b) continue;
+      b.requires = [...new Set([...(b.requires ?? []), ...task.require])];
+      after.namespace.set(n, b);
+      changed = true;
+    }
+    if (changed) saveRepo(root, after);
+  }
   return { state: "done", comment: result.report, assumptions };
 }
 

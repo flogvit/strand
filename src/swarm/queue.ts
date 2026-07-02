@@ -23,6 +23,9 @@ export interface Task {
   /** Planner-assigned helper namespace (#52): when set, every def this task
    *  produces must be the target or carry this prefix, enforced by the worker. */
   helperPrefix?: string;
+  /** Checks to require on every definition this task lands (#51) — e.g.
+   *  ["tests"], so `strand verify` becomes the workload's definition of done. */
+  require?: string[];
   state: TaskState;
   assignee: string | null;
 }
@@ -104,6 +107,7 @@ export class FileQueue implements Queue {
         target: spec.target,
         deps: spec.deps,
         ...(spec.helperPrefix ? { helperPrefix: spec.helperPrefix } : {}),
+        ...(spec.require?.length ? { require: spec.require } : {}),
         state: spec.state ?? "ready",
         assignee: null,
       };

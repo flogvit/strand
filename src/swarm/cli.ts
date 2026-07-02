@@ -32,8 +32,10 @@ function parseArgs(argv: string[]): Args {
 
 const USAGE = `strand-swarm — autonomous, provider-agnostic agent orchestration
 
-  strand-swarm plan [--queue <dir> | --gh <owner/repo>]
+  strand-swarm plan [--queue <dir> | --gh <owner/repo>] [--require-tests]
                                                     seed the Sudoku decomposition as tasks
+                                                    (--require-tests gates every landed def
+                                                    on attested tests — verify is then done)
   strand-swarm work --as <id> --provider <name> [--root <dir>] [--queue <dir> | --gh <owner/repo>]
                     [--peers <url,url>] [--poll <ms>] [--idle <n>]
                                                     run a worker until the queue drains
@@ -62,7 +64,10 @@ async function main(argv: string[]): Promise<number> {
 
   switch (cmd) {
     case "plan": {
-      const tasks = seed(queue);
+      const { repoExists } = await import("../persist.ts");
+      const tasks = seed(queue, undefined, repoExists(root) ? root : undefined, {
+        requireTests: opts["require-tests"] === "true",
+      });
       console.log(`seeded ${tasks.length} tasks into ${queueName}`);
       return 0;
     }
@@ -145,6 +150,25 @@ async function main(argv: string[]): Promise<number> {
       for (const t of tasks) {
         const who = t.assignee ? ` @${t.assignee}` : "";
         console.log(`  [${t.state}] #${t.id} ${t.role} ${t.target.join(",")}${who}`);
+      }
+      // #51: the board reports attestation state — done should mean attested.
+      const { repoExists, loadRepo } = await import("../persist.ts");
+      if (repoExists(root)) {
+        const repo = loadRepo(root);
+        let required = 0;
+        let green = 0;
+        const red: string[] = [];
+        for (const [name, b] of repo.namespace) {
+          const req = b.requires ?? [];
+          if (req.length === 0) continue;
+          required++;
+          const attested = new Set(repo.attestations[b.hash] ?? []);
+          if (req.every((c) => attested.has(c))) green++;
+          else red.push(name);
+        }
+        if (required > 0) {
+          console.log(`attested: ${green}/${required} required definitions green${red.length ? ` — missing: ${red.sort().join(", ")}` : ""}`);
+        }
       }
       return 0;
     }

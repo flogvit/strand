@@ -52,6 +52,12 @@ export const HELPER_NAMING =
   "for a task targeting `solve`, write `solveTry`, `solveStep` — never bare `go`, `aux`, `loop`, `step`. " +
   "Another agent inventing the same bare name would force a needless conflict.";
 
+export interface SeedOptions {
+  /** #51: code tasks carry require:["tests"], so every landed definition is
+   *  gated on attested tests and `strand verify` is the definition of done. */
+  requireTests?: boolean;
+}
+
 /** Seed a decomposition into the queue: one `code` task per definition, plus one
  *  `test` task per definition that depends on its code task. Dependency edges are
  *  resolved from definition names to the queue ids they were assigned.
@@ -59,7 +65,7 @@ export const HELPER_NAMING =
  *  With a `root`, pinned specs land as spec notes in the repo's decision memory
  *  before any worker runs — the contract plane the agents author against — and
  *  the helper-naming convention (#52) is pinned across all seeded names. */
-export function seed(queue: Queue, defs: DefSpec[] = SUDOKU, root?: string): Task[] {
+export function seed(queue: Queue, defs: DefSpec[] = SUDOKU, root?: string, opts: SeedOptions = {}): Task[] {
   if (root) {
     const repo = loadRepo(root);
     for (const d of defs) {
@@ -81,10 +87,10 @@ export function seed(queue: Queue, defs: DefSpec[] = SUDOKU, root?: string): Tas
     });
     saveRepo(root, repo);
   }
-  return seedTasks(queue, defs);
+  return seedTasks(queue, defs, opts);
 }
 
-function seedTasks(queue: Queue, defs: DefSpec[]): Task[] {
+function seedTasks(queue: Queue, defs: DefSpec[], opts: SeedOptions = {}): Task[] {
   const codeIdByName = new Map<string, string>();
   const created: Task[] = [];
 
@@ -95,6 +101,7 @@ function seedTasks(queue: Queue, defs: DefSpec[]): Task[] {
       intent: d.intent,
       target: [d.name],
       ...(d.helperPrefix ? { helperPrefix: d.helperPrefix } : {}),
+      ...(opts.requireTests && d.test !== false ? { require: ["tests"] } : {}),
       deps: d.deps.map((n) => {
         const id = codeIdByName.get(n);
         if (!id) throw new Error(`'${d.name}' depends on '${n}', which is not defined earlier`);
