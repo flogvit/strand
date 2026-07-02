@@ -2,7 +2,21 @@
   "name": "strand",
   "private": true,
   "type": "module",
-  "description": "Strand — content-addressed, conflict-free substrate for parallel agent authoring (wedge 1 prototype)",
+  "description": "Strand — a content-addressed substrate and typed language where AI agent swarms author one codebase in parallel through a type-checker green-gate",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flogvit/strand.git"
+  },
+  "keywords": [
+    "content-addressed",
+    "crdt",
+    "agents",
+    "swarm",
+    "merge",
+    "typescript",
+    "language"
+  ],
   "scripts": {
     "strand": "tsx src/cli.ts",
     "strand-ts": "tsx src/ts/cli.ts",
