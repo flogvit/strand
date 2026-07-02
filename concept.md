@@ -3,6 +3,14 @@
 > Status: v0. Justeres fortløpende. Prioriteringen er ærlig etter **hva som faktisk
 > hjelper Claude når den kjører mange agenter**, ikke etter hva som er kulest å bygge.
 
+> **Redaktørnotat (2026-07-02, in Norwegian like the rest of this design
+> record).** Dokumentet er bevart som opprinnelig skrevet. Veivalget det drøfter
+> — optimistisk innholds-adressert merge kontra pessimistiske claims/leasing —
+> ble senere avgjort til fordel for den **optimistiske, koordinator-frie** veien
+> (namespacet er en state-basert CRDT; myke hint finnes, men er aldri låser).
+> Skepsisen til store svermer her er fra før systemet fantes; se README og
+> `docs/` for hva som faktisk ble bygget og målt.
+
 ## Nordstjerne
 
 La én person trygt la mange AI-agenter jobbe på samme kodebase samtidig, **uten** at
