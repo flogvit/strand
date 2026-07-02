@@ -1,0 +1,135 @@
+# Strand html — typed markup: structure and escaping by construction (#47).
+#
+# Every other pipeline lints HTML *after* generation; here malformed or unsafe
+# markup is untypeable. `render` is the only place HTML text is made: `Txt`
+# escapes at render time, raw output requires an explicit, greppable `Raw`,
+# and tags always close because the tree closes them, not the author.
+
+data Attr = Attr Text Text
+data Html = El Text (List Attr) (List Html) | Txt Text | Raw Text
+
+# --- escaping ---------------------------------------------------------------
+
+def escapeHtmlChar (c: Text) -> Text =
+  if c == "&" then "&amp;"
+  else if c == "<" then "&lt;"
+  else if c == ">" then "&gt;"
+  else if c == "\"" then "&quot;"
+  else if c == "'" then "&#39;"
+  else c
+
+def escapeHtmlFrom (i: Int) (s: Text) -> Text =
+  if i >= textLength s then ""
+  else escapeHtmlChar (charAt i s) ++ escapeHtmlFrom (i + 1) s
+
+def escapeHtml (s: Text) -> Text = escapeHtmlFrom 0 s
+
+# --- rendering --------------------------------------------------------------
+
+# Void elements never take children and never close (<img>, <br>, ...).
+def htmlVoidTag (tag: Text) -> Bool =
+  if tag == "img" then true
+  else if tag == "br" then true
+  else if tag == "hr" then true
+  else if tag == "input" then true
+  else if tag == "meta" then true
+  else if tag == "link" then true
+  else false
+
+def renderAttr (a: Attr) -> Text =
+  match a { Attr k v -> " " ++ k ++ "=\"" ++ escapeHtml v ++ "\"" }
+
+def renderAttrs (attrs: List Attr) -> Text =
+  match attrs { Nil -> "" | Cons a rest -> renderAttr a ++ renderAttrs rest }
+
+def render (h: Html) -> Text =
+  match h {
+    Txt s -> escapeHtml s
+  | Raw s -> s
+  | El tag attrs kids ->
+      if htmlVoidTag tag
+      then "<" ++ tag ++ renderAttrs attrs ++ ">"
+      else "<" ++ tag ++ renderAttrs attrs ++ ">" ++ renderKids kids ++ "</" ++ tag ++ ">"
+  }
+
+def renderKids (kids: List Html) -> Text =
+  match kids { Nil -> "" | Cons h rest -> render h ++ renderKids rest }
+
+# A whole page: the doctype cannot live inside the tree, so this is the one
+# sanctioned Raw-free way to produce a document.
+def renderDoc (root: Html) -> Text = "<!doctype html>" ++ render root
+
+# --- attribute combinators ---------------------------------------------------
+
+def attr (k: Text) (v: Text) -> Attr = Attr k v
+def class_ (v: Text) -> Attr = Attr "class" v
+def id_ (v: Text) -> Attr = Attr "id" v
+def href_ (v: Text) -> Attr = Attr "href" v
+def src_ (v: Text) -> Attr = Attr "src" v
+def alt_ (v: Text) -> Attr = Attr "alt" v
+def rel_ (v: Text) -> Attr = Attr "rel" v
+def title_ (v: Text) -> Attr = Attr "title" v
+
+# --- element combinators -----------------------------------------------------
+
+def el (tag: Text) (attrs: List Attr) (kids: List Html) -> Html = El tag attrs kids
+def txt (s: Text) -> Html = Txt s
+
+def html_ (attrs: List Attr) (kids: List Html) -> Html = El "html" attrs kids
+def head_ (attrs: List Attr) (kids: List Html) -> Html = El "head" attrs kids
+def body_ (attrs: List Attr) (kids: List Html) -> Html = El "body" attrs kids
+def div_ (attrs: List Attr) (kids: List Html) -> Html = El "div" attrs kids
+def span_ (attrs: List Attr) (kids: List Html) -> Html = El "span" attrs kids
+def p_ (attrs: List Attr) (kids: List Html) -> Html = El "p" attrs kids
+def a_ (attrs: List Attr) (kids: List Html) -> Html = El "a" attrs kids
+def h1_ (attrs: List Attr) (kids: List Html) -> Html = El "h1" attrs kids
+def h2_ (attrs: List Attr) (kids: List Html) -> Html = El "h2" attrs kids
+def h3_ (attrs: List Attr) (kids: List Html) -> Html = El "h3" attrs kids
+def ul_ (attrs: List Attr) (kids: List Html) -> Html = El "ul" attrs kids
+def ol_ (attrs: List Attr) (kids: List Html) -> Html = El "ol" attrs kids
+def li_ (attrs: List Attr) (kids: List Html) -> Html = El "li" attrs kids
+def pre_ (attrs: List Attr) (kids: List Html) -> Html = El "pre" attrs kids
+def code_ (attrs: List Attr) (kids: List Html) -> Html = El "code" attrs kids
+def em_ (attrs: List Attr) (kids: List Html) -> Html = El "em" attrs kids
+def strong_ (attrs: List Attr) (kids: List Html) -> Html = El "strong" attrs kids
+def header_ (attrs: List Attr) (kids: List Html) -> Html = El "header" attrs kids
+def footer_ (attrs: List Attr) (kids: List Html) -> Html = El "footer" attrs kids
+def main_ (attrs: List Attr) (kids: List Html) -> Html = El "main" attrs kids
+def nav_ (attrs: List Attr) (kids: List Html) -> Html = El "nav" attrs kids
+def section_ (attrs: List Attr) (kids: List Html) -> Html = El "section" attrs kids
+def article_ (attrs: List Attr) (kids: List Html) -> Html = El "article" attrs kids
+def table_ (attrs: List Attr) (kids: List Html) -> Html = El "table" attrs kids
+def tr_ (attrs: List Attr) (kids: List Html) -> Html = El "tr" attrs kids
+def td_ (attrs: List Attr) (kids: List Html) -> Html = El "td" attrs kids
+def th_ (attrs: List Attr) (kids: List Html) -> Html = El "th" attrs kids
+def img_ (attrs: List Attr) -> Html = El "img" attrs Nil
+def br_ -> Html = El "br" Nil Nil
+def hr_ -> Html = El "hr" Nil Nil
+
+# --- tests (zero-arg Bool defs: the gate runs these) --------------------------
+
+def tst_escapeHtmlAll -> Bool =
+  escapeHtml "<a href=\"x\">&'" == "&lt;a href=&quot;x&quot;&gt;&amp;&#39;"
+
+def tst_escapeHtmlPlain -> Bool = escapeHtml "heia" == "heia"
+
+def tst_renderTxtEscapes -> Bool =
+  render (Txt "<b>") == "&lt;b&gt;"
+
+def tst_renderRawIsVerbatim -> Bool =
+  render (Raw "<b>") == "<b>"
+
+def tst_renderNesting -> Bool =
+  render (div_ (Cons (class_ "hero") Nil) (Cons (p_ Nil (Cons (txt "hi & bye") Nil)) Nil))
+    == "<div class=\"hero\"><p>hi &amp; bye</p></div>"
+
+def tst_renderAttrValueEscapes -> Bool =
+  render (a_ (Cons (href_ "?a=1&b=\"2\"") Nil) (Cons (txt "x") Nil))
+    == "<a href=\"?a=1&amp;b=&quot;2&quot;\">x</a>"
+
+def tst_renderVoid -> Bool =
+  render (img_ (Cons (src_ "x.png") (Cons (alt_ "x") Nil))) == "<img src=\"x.png\" alt=\"x\">"
+
+def tst_renderDoc -> Bool =
+  renderDoc (html_ Nil (Cons (body_ Nil (Cons (txt "hei") Nil)) Nil))
+    == "<!doctype html><html><body>hei</body></html>"
